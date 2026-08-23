@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MMPL Certificates &amp; Billing Dashboard</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card">
+    <h1>MMPL Dashboard</h1>
+    <p class="muted">Sign in to continue</p>
+    <label>Username<input type="text" id="loginUsername" autocomplete="username" required /></label>
+    <label>Password<input type="password" id="loginPassword" autocomplete="current-password" required /></label>
+    <button type="submit">Sign in</button>
+    <p id="loginError" class="error" hidden></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <h1>MMPL Certificates &amp; Billing</h1>
+    <div class="topbar-right">
+      <span id="whoami" class="muted"></span>
+      <button id="logoutBtn" class="link-btn">Sign out</button>
+    </div>
+  </header>
+
+  <nav id="tabs" class="tabs"></nav>
+
+  <main id="mainContent" class="main-content"></main>
+</div>
+
+<div id="clientPortal" hidden>
+  <header class="topbar">
+    <h1>MMPL Client Portal</h1>
+    <div class="topbar-right">
+      <span id="clientWhoami" class="muted"></span>
+      <button id="clientLogoutBtn" class="link-btn">Sign out</button>
+    </div>
+  </header>
+  <main id="clientMainContent" class="main-content"></main>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-root"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
