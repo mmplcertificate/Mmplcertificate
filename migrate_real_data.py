@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+# One-time migration: pushes your real certificate tracker data (139 records)
+# and a set of real signed/draft certificate documents into the live Render
+# trial, using the app's own HTTP API - nothing else needed, no server shell
+# access required (Render's free tier doesn't offer that anyway).
+#
+# HOW TO RUN (in Git Bash, from anywhere):
+#   ADMIN_PASSWORD="your-real-admin-password" python migrate_real_data.py
+#
+# Your password only ever goes from your own machine straight to
+# mmplcertificate.onrender.com - it is not written anywhere in this file and
+# is never seen by anyone else.
+#
+# What this does:
+#  1. Migrates all 139 certificate records from certificates_data.json
+#     (tracker/billing data only - no documents) so the trial's dashboard
+#     is fully populated.
+#  2. Creates 32 extra certificate records, one per real past engagement,
+#     each with its actual real signed (or draft) certificate document
+#     attached - these are what Gemini will match against and draft from
+#     when you submit a test NIT.
+#  3. Adds 4 blank master templates (from "Certificate Templates") as a
+#     fallback for categories that don't have a real example above.
+#
+# This is a ONE-TIME script for the temporary Render trial. Real production
+# migration (with persistent storage) will happen properly once AWS is live.
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import requests
+
+BASE = os.environ.get("MMPL_BASE_URL", "https://mmplcertificate.onrender.com")
+MMPL_ROOT = Path(r"C:\Users\USER\Desktop\MMPL\Certificates 25-26")
+DATA_JSON = MMPL_ROOT / "Dashboard and Automation Tool" / "certificates_data.json"
+TEMPLATES_DIR = MMPL_ROOT / "Certificate Templates"
+
+# Real signed/draft certificates, hand-picked from the real MMPL AK folders
+# (walked folder-by-folder, not from the stale per-engagement auto-tags) to
+# exclude anything that was mail/letter correspondence rather than the actual
+# certificate, and to exclude anything too ambiguous to confidently categorize.
+PICKS = json.loads(r"""[{"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate- Harpalpur.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate-Shergaon.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholder Certificate-Harpalpur.pdf", "category": "Shareholding Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholding Certificate-Shergaon Block.pdf", "category": "Shareholding Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Local Content/Local Content Certificate.pdf", "category": "Local Content Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Turnover Certificate/Turnover Certificate.pdf", "category": "Turnover Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Working Capital Certificate/Working Capital certificate.pdf", "category": "Working Capital Certificate"}, {"engagement": "14.04.2026 Solvency Certificate AEO Program", "file": "MMPL AK/14.04.2026 Solvency Certificate AEO Program/Solvency certificate.pdf", "category": "Solvency Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate amdabera.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate khandap.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate Mushanal.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/shareholding certificate amdabera .pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Khandap.pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Mushanal.pdf", "category": "Shareholding Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Networth.pdf", "category": "Net Worth Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Turnover.pdf", "category": "Turnover Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (CDR)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/CDR/CDR_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (Production Shaft)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/Production Shaft/CDR_PS_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "21.03.2026 Gmet_Net Worh", "file": "MMPL AK/21.03.2026 Gmet_Net Worh/Net Worth Certificate Signed GMET.pdf", "category": "Net Worth Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/NO CDR Certificate_Khetri.pdf", "category": "No CDR Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/Turnover Certificate_Khetri.pdf", "category": "Turnover Certificate"}, {"engagement": "26.02.2026 Share holding certificate GOI MOM", "file": "MMPL AK/26.02.2026 Share holding certificate GOI MOM/Signed Shareholding Certificate.pdf", "category": "Shareholding Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Local Content Certificate_001.pdf", "category": "Local Content Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/No CDR Certificate_001.pdf", "category": "No CDR Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Working Capital Certificate_001.pdf", "category": "Working Capital Certificate"}, {"engagement": "30.05.2026 MOIL-ukwa", "file": "MMPL AK/30.05.2026 MOIL-ukwa/MOIL-ukwa/signed certificate Local Content Certificate MOIL .pdf", "category": "Local Content Certificate"}, {"engagement": "GMDC Ambaji Core Drilling Tender (New folder)", "file": "New folder/Signed Certificate Turnover and PL.pdf", "category": "Turnover Certificate"}, {"engagement": "ECL Winder Local Content (New folder (2))", "file": "New folder (2)/ECL_Local_Content_Certificate_MMPL_1.docx", "category": "Local Content Certificate"}]""")
+
+BLANK_TEMPLATES = [
+    ("CDR Certificate.docx", "CDR Certificate"),
+    ("Local Content certificate.docx", "Local Content Certificate"),
+    ("Net Worth.docx", "Net Worth Certificate"),
+    ("Turnover Certificate.docx", "Turnover Certificate"),
+]
+
+
+def login():
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not password:
+        print('Set ADMIN_PASSWORD in your shell first, e.g.:', file=sys.stderr)
+        print('  ADMIN_PASSWORD="your-real-password" python migrate_real_data.py', file=sys.stderr)
+        sys.exit(1)
+    session = requests.Session()
+    res = session.post(f"{BASE}/api/auth/login", json={"username": "admin", "password": password})
+    if not res.ok:
+        print(f"Login failed: {res.status_code} {res.text}", file=sys.stderr)
+        sys.exit(1)
+    if "mmpl_session" not in session.cookies:
+        print("Login succeeded but no session cookie came back - aborting.", file=sys.stderr)
+        sys.exit(1)
+    return session
+
+
+def create_certificate(session, body):
+    res = session.post(f"{BASE}/api/certificates", json=body)
+    if not res.ok:
+        raise RuntimeError(f"create cert failed: {res.status_code} {res.text}")
+    return res.json()
+
+
+def attach_document(session, cert_id, file_path, display_name):
+    with open(file_path, "rb") as f:
+        files = {"file": (display_name, f)}
+        data = {"doc_type": "certificate", "display_name": display_name}
+        res = session.post(f"{BASE}/api/certificates/{cert_id}/documents", files=files, data=data)
+    if not res.ok:
+        raise RuntimeError(f"attach doc failed: {res.status_code} {res.text}")
+    return res.json()
+
+
+def main():
+    print("Logging in as admin...")
+    session = login()
+    print("Logged in.\n")
+
+    # --- Part 1: full certificate metadata (139 records) ---
+    raw = json.loads(DATA_JSON.read_text(encoding="utf-8"))
+    certs = raw.get("certificates", [])
+    print(f"Part 1: migrating {len(certs)} certificate records (metadata only)...")
+    n = 0
+    failed1 = 0
+    for c in certs:
+        try:
+            create_certificate(session, {
+                "stage": c.get("stage") or "in_progress",
+                "category": c.get("category"),
+                "client": c.get("client"),
+                "owner": c.get("owner"),
+                "tender_no": c.get("tender_no"),
+                "fy": c.get("fy"),
+                "particulars": c.get("particulars"),
+                "document_date": c.get("document_date"),
+                "signing_date": c.get("signing_date"),
+                "target_date": c.get("target_date"),
+                "amount": c.get("amount"),
+                "udin": c.get("udin"),
+                "bill_no": c.get("bill_no"),
+                "bill_date": c.get("bill_date"),
+                "notes": c.get("notes"),
+            })
+            n += 1
+            if n % 20 == 0:
+                print(f"  {n}/{len(certs)}")
+        except Exception as e:
+            failed1 += 1
+            print(f'  FAILED on "{c.get("particulars") or c.get("id")}": {e}')
+    print(f"Part 1 done: {n} migrated, {failed1} failed.\n")
+
+    # --- Part 2: real signed/draft certificates as drafting templates ---
+    print(f"Part 2: attaching {len(PICKS)} real template documents...")
+    m = 0
+    failed2 = 0
+    for p in PICKS:
+        file_path = MMPL_ROOT / p["file"]
+        if not file_path.exists():
+            print(f"  MISSING, skipping: {file_path}")
+            failed2 += 1
+            continue
+        try:
+            cert = create_certificate(session, {
+                "stage": "billed",
+                "category": p["category"],
+                "client": "MMPL Private Limited",
+                "particulars": p["engagement"],
+                "notes": f'Real template migrated for Gemini drafting testing (source engagement: {p["engagement"]})',
+            })
+            attach_document(session, cert["id"], file_path, file_path.name)
+            m += 1
+            print(f'  [{m}/{len(PICKS)}] {p["category"]} <- {p["engagement"]}')
+        except Exception as e:
+            failed2 += 1
+            print(f'  FAILED on "{p["engagement"]}": {e}')
+    print(f"Part 2 done: {m} attached, {failed2} failed/missing.\n")
+
+    # --- Part 3: blank master templates as a category fallback ---
+    print("Part 3: attaching blank master templates...")
+    k = 0
+    for fname, cat in BLANK_TEMPLATES:
+        file_path = TEMPLATES_DIR / fname
+        if not file_path.exists():
+            print(f"  MISSING, skipping: {file_path}")
+            continue
+        try:
+            cert = create_certificate(session, {
+                "stage": "billed",
+                "category": cat,
+                "client": "MMPL Private Limited",
+                "particulars": f"Master blank template - {cat}",
+                "notes": "Blank master template migrated for Gemini drafting testing.",
+            })
+            attach_document(session, cert["id"], file_path, fname)
+            k += 1
+            print(f"  attached: {cat}")
+        except Exception as e:
+            print(f'  FAILED on "{cat}": {e}')
+    print(f"Part 3 done: {k} blank templates attached.\n")
+
+    print("All done. Log into the dashboard and check the certificates list.")
+
+
+if __name__ == "__main__":
+    main()

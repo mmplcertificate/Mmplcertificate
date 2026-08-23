@@ -86,4 +86,79 @@ async function draftFromTemplate({ category, requestType, templateText, nitText,
   return DISCLAIMER + draft;
 }
 
-module.exports = { generate, draftFromTemplate, DISCLAIMER, MODEL };
+// Canonical category names - must match certificates.category in the DB
+// exactly (see lib/template-matcher.js's CATEGORY_KEYWORDS, which was fixed
+// 2026-08-23 for this exact reason) so a requirement picked from this list
+// downstream matches a real past certificate.
+const KNOWN_CATEGORIES = [
+  'Net Worth Certificate',
+  'Turnover Certificate',
+  'Local Content Certificate',
+  'CDR Certificate',
+  'No CDR Certificate',
+  'Shareholding Certificate',
+  'Working Capital Certificate',
+  'Solvency Certificate',
+  'Total Income Certificate',
+  'Audit Under Process Certificate',
+  'AEO Registration Certificate',
+  'CDR / IBC Certificate',
+  'Other Certificate',
+];
+
+/**
+ * Reads a tender/NIT document's text (expects "[PAGE n]" markers from
+ * document-text.js#extractTextWithPages) and identifies every certificate
+ * and/or MRL the tender requires the bidder's STATUTORY AUDITOR to issue,
+ * each with a page reference and a supporting quote. Powers the "scan a
+ * tender document" upload flow - the caller reviews/picks from this list
+ * before anything is actually drafted, so a missed or over-eager match here
+ * is corrected by a human, not acted on blindly.
+ *
+ * Returns a parsed array (never throws on malformed model output without
+ * first trying a couple of recovery strategies - see parseRequirementsJson).
+ * Throwing here should always mean "show the error, fall back to the manual
+ * form" to the caller, same convention as draftFromTemplate.
+ */
+async function analyzeTenderDocument({ text }) {
+  const prompt = [
+    "You are a statutory-audit compliance assistant for an Indian Chartered Accountant firm (Singhi & Co.), reviewing a tender/bid document (NIT) on behalf of a bidding company (MMPL Private Limited).",
+    'The tender document text below includes "[PAGE n]" markers showing where each page starts - use the nearest preceding marker as the page reference for anything you cite.',
+    "Identify every certificate and/or MRL (Manufacturer's Relationship Letter / manufacturer authorization letter) that this tender explicitly requires to be issued or signed by the bidder's STATUTORY AUDITOR / Chartered Accountant - not documents required from any other party (bank, government authority, manufacturer, etc.) unless it is specifically an MRL requirement.",
+    `For each one found, use exactly one of these category names if it matches (do not invent variants or abbreviate): ${KNOWN_CATEGORIES.join(', ')}, or "MRL". If a requirement doesn't cleanly match any of these, use "Other Certificate" and explain what it actually is in the reasoning field.`,
+    'Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of objects with this exact shape:\n[{"category": "Net Worth Certificate", "page_reference": "Page 4", "quote": "the exact short clause from the document, max ~200 characters", "reasoning": "one sentence on why this certificate is required"}]',
+    'If the document does not clearly require any statutory-auditor certificate or MRL, respond with an empty JSON array: []. Do not guess or include anything that is not clearly stated as required - a false positive is worse than a miss here, since a human reviews this list before anything is drafted.',
+    `Tender document text:\n---\n${text.slice(0, 40000)}\n---`,
+  ].join('\n\n');
+
+  const raw = await generate(prompt);
+  return parseRequirementsJson(raw);
+}
+
+function parseRequirementsJson(raw) {
+  // Gemini sometimes wraps JSON in ```json ... ``` fences despite being told
+  // not to - strip those before parsing rather than failing on them.
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    // Last resort: grab the first [...] block in the response, in case the
+    // model added a stray sentence before/after the JSON despite the prompt.
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error(`Gemini analysis response was not valid JSON: ${cleaned.slice(0, 200)}`);
+    parsed = JSON.parse(match[0]);
+  }
+  if (!Array.isArray(parsed)) throw new Error('Gemini analysis response was not a JSON array');
+  return parsed
+    .filter((item) => item && typeof item === 'object' && item.category)
+    .map((item) => ({
+      category: String(item.category).trim(),
+      page_reference: item.page_reference ? String(item.page_reference).trim() : null,
+      quote: item.quote ? String(item.quote).trim() : null,
+      reasoning: item.reasoning ? String(item.reasoning).trim() : null,
+      is_mrl: /mrl/i.test(String(item.category)),
+    }));
+}
+
+module.exports = { generate, draftFromTemplate, analyzeTenderDocument, KNOWN_CATEGORIES, DISCLAIMER, MODEL };

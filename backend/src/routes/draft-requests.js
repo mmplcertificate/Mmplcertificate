@@ -19,12 +19,81 @@ const db = require('../db');
 const storage = require('../storage');
 const { requireRole, requirePermission, logAudit } = require('../auth');
 const { matchFromText } = require('../lib/template-matcher');
-const { extractText } = require('../lib/document-text');
-const { draftFromTemplate } = require('../lib/gemini-client');
+const { extractText, extractTextWithPages } = require('../lib/document-text');
+const { draftFromTemplate, analyzeTenderDocument } = require('../lib/gemini-client');
 const { notifyNewDraftRequest } = require('../lib/notify');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+// Shared by both POST '/' and POST '/analyze': clients always use these
+// routes to reach Akash; admin/team can also use them directly (e.g. to
+// scan/test a NIT without a separate client login). Team members need the
+// 'drafting' permission (same one that gates the Client Requests tab).
+function requireDraftingAccess(req, res, next) {
+  if (req.user.role === 'team' && !(req.user.permissions && req.user.permissions.drafting)) {
+    return res.status(403).json({ error: 'Missing permission: drafting' });
+  }
+  next();
+}
+
+// Uploads a tender/NIT file and asks Gemini which certificates and/or MRL
+// it requires from the statutory auditor, with page references - the
+// "scan a tender document" flow. This only reads and analyzes the file; it
+// does not create any draft_requests rows itself. The caller reviews the
+// returned requirements and picks which ones to actually submit via the
+// normal POST '/' below, passing nit_file_id to reuse this same upload
+// instead of re-uploading it once per selected certificate.
+router.post('/analyze', requireRole('client', 'admin', 'team'), requireDraftingAccess, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'file is required' });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(400).json({
+      error: 'Tender scanning needs GEMINI_API_KEY to be configured, which is not set up yet. Use the manual request form below instead.',
+    });
+  }
+
+  const sha256 = storage.sha256Buffer(req.file.buffer);
+  const key = storage.keyForHash(sha256, req.file.originalname);
+  await storage.putObject(key, req.file.buffer, req.file.mimetype);
+  db.prepare(
+    `INSERT INTO file_library (sha256, storage_key, original_name, size_bytes, mime_type)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(sha256) DO NOTHING`
+  ).run(sha256, key, req.file.originalname, req.file.buffer.length, req.file.mimetype);
+  const fileRow = db.prepare('SELECT * FROM file_library WHERE sha256 = ?').get(sha256);
+
+  logAudit(req.user, 'draft_request.analyze', fileRow.id);
+
+  let text = null;
+  try {
+    text = await extractTextWithPages(req.file.buffer, req.file.mimetype, req.file.originalname);
+  } catch (e) {
+    text = null;
+  }
+
+  if (!text || !text.trim()) {
+    return res.json({
+      nit_file_id: fileRow.id,
+      filename: req.file.originalname,
+      requirements: [],
+      error:
+        'Could not read any text from this file (unsupported format, or a scanned document with no readable text). You can still submit a request manually below.',
+    });
+  }
+
+  try {
+    const requirements = await analyzeTenderDocument({ text });
+    res.json({ nit_file_id: fileRow.id, filename: req.file.originalname, requirements, error: null });
+  } catch (e) {
+    console.error('Tender analysis failed:', e.message);
+    res.json({
+      nit_file_id: fileRow.id,
+      filename: req.file.originalname,
+      requirements: [],
+      error: `Automatic analysis failed (${e.message}). You can still submit a request manually below.`,
+    });
+  }
+});
 
 // Submit a new request (NIT upload + auto-template-match). Clients always
 // use this to reach Akash; admin/team can also submit here themselves -
@@ -33,22 +102,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 router.post(
   '/',
   requireRole('client', 'admin', 'team'),
-  (req, res, next) => {
-    // Team members need the 'drafting' permission (same one that gates the
-    // Client Requests tab) to submit a test request. Admin and client
-    // always pass this check.
-    if (req.user.role === 'team' && !(req.user.permissions && req.user.permissions.drafting)) {
-      return res.status(403).json({ error: 'Missing permission: drafting' });
-    }
-    next();
-  },
+  requireDraftingAccess,
   upload.single('nit'),
   async (req, res) => {
   const { request_type, category, notes } = req.body || {};
   if (!request_type) return res.status(400).json({ error: 'request_type is required' });
 
   let nitFileId = null;
-  let matchText = `${category || ''} ${notes || ''} ${req.file ? req.file.originalname : ''}`;
+  let nitFilenameForMatch = '';
 
   if (req.file) {
     const sha256 = storage.sha256Buffer(req.file.buffer);
@@ -63,7 +124,19 @@ router.post(
       .run(sha256, key, req.file.originalname, req.file.buffer.length, req.file.mimetype);
     const fileRow = db.prepare('SELECT * FROM file_library WHERE sha256 = ?').get(sha256);
     nitFileId = fileRow.id;
+    nitFilenameForMatch = req.file.originalname;
+  } else if (req.body && req.body.nit_file_id) {
+    // Reusing a file already uploaded via the '/analyze' tender-scan step -
+    // e.g. several certificates picked off one scanned NIT each become
+    // their own request without re-uploading the same file each time.
+    const existing = db.prepare('SELECT * FROM file_library WHERE id = ?').get(req.body.nit_file_id);
+    if (existing) {
+      nitFileId = existing.id;
+      nitFilenameForMatch = existing.original_name;
+    }
   }
+
+  const matchText = `${category || ''} ${notes || ''} ${nitFilenameForMatch}`;
 
   const candidates = db.prepare('SELECT * FROM certificates').all();
   const forcedCategory = request_type === 'mrl' ? 'MRL' : category;

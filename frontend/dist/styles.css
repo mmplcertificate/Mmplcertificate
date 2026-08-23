@@ -130,6 +130,13 @@ button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); }
 
+.dropzone {
+  border: 2px dashed var(--border); border-radius: 10px; padding: 1.5rem;
+  text-align: center; color: var(--muted); transition: border-color 0.15s, background 0.15s;
+}
+.dropzone.dragover { border-color: var(--accent); background: #eff6ff; }
+.dropzone input[type="file"] { margin-top: 0.5rem; }
+
 .chart-card canvas { max-width: 100%; }
 .checkbox-cell { width: 2rem; text-align: center; }
 

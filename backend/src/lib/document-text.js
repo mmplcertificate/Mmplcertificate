@@ -75,6 +75,93 @@ async function ocrPdfBuffer(buffer) {
   }
 }
 
+// Same PDF text-layer/OCR extraction as extractText() above, but preserves
+// page boundaries as inline "[PAGE n]" markers so a downstream AI analysis
+// prompt (see gemini-client.js#analyzeTenderDocument) can cite a real page
+// number instead of guessing. Only PDFs get real per-page markers - other
+// formats fall back to the plain extractor (single implicit page, callers
+// should treat a missing "[PAGE n]" marker as "not available for this file
+// type" rather than an error).
+async function extractTextWithPages(buffer, mimeType, filename) {
+  const ext = path.extname(filename || '').toLowerCase();
+
+  if (mimeType === 'application/pdf' || ext === '.pdf') {
+    // Same "a thrown parse still deserves an OCR attempt" fix as extractText()
+    // above - see the comment there for why (real-world PDFs, not just
+    // corrupt ones, can make pdf-parse throw outright).
+    let parsedText = null;
+    try {
+      const pdfParse = require('pdf-parse');
+      const result = await pdfParse(buffer, { pagerender: renderPdfPageWithMarker });
+      if (result.text && result.text.trim()) parsedText = result.text;
+    } catch (e) {
+      console.error(`Paged pdf-parse failed for ${filename} (falling back to OCR):`, e.message);
+    }
+    if (parsedText) return parsedText;
+    return await ocrPdfBufferWithPages(buffer).catch((e) => {
+      console.error(`OCR fallback (paged) failed for ${filename}:`, e.message);
+      return null;
+    });
+  }
+
+  return extractText(buffer, mimeType, filename);
+}
+
+// pdf-parse's default page renderer, with a "[PAGE n]" marker prefixed to
+// each page's text. pageData is a pdfjs-dist PDFPageProxy, which carries its
+// own 1-indexed pageNumber - using that (rather than a counter we track
+// ourselves) keeps the marker correct even if pdf-parse ever changes how/
+// whether pages are visited in order.
+function renderPdfPageWithMarker(pageData) {
+  const renderOptions = { normalizeWhitespace: false, disableCombineTextItems: false };
+  return pageData.getTextContent(renderOptions).then((textContent) => {
+    let lastY;
+    let text = '';
+    for (const item of textContent.items) {
+      if (lastY === item.transform[5] || !lastY) {
+        text += item.str;
+      } else {
+        text += '\n' + item.str;
+      }
+      lastY = item.transform[5];
+    }
+    return `\n\n[PAGE ${pageData.pageNumber}]\n${text}`;
+  });
+}
+
+// Same as ocrPdfBuffer() above, but labels each page's OCR text with a
+// "[PAGE n]" marker (page number = rasterization order, capped at
+// OCR_MAX_PAGES same as the plain OCR path).
+async function ocrPdfBufferWithPages(buffer) {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'mmpl-ocr-pg-'));
+  const pdfPath = path.join(tmpDir, 'in.pdf');
+  const outPrefix = path.join(tmpDir, 'page');
+  try {
+    await fs.promises.writeFile(pdfPath, buffer);
+    await execFileAsync(
+      'pdftoppm',
+      ['-png', '-r', String(OCR_DPI), '-l', String(OCR_MAX_PAGES), pdfPath, outPrefix],
+      { timeout: OCR_TIMEOUT_MS }
+    );
+    const pages = (await fs.promises.readdir(tmpDir))
+      .filter((f) => f.startsWith('page') && f.endsWith('.png'))
+      .sort();
+    if (pages.length === 0) return null;
+
+    const texts = [];
+    for (let i = 0; i < pages.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const pageBuffer = await fs.promises.readFile(path.join(tmpDir, pages[i]));
+      // eslint-disable-next-line no-await-in-loop
+      const text = await ocrImageBuffer(pageBuffer);
+      if (text && text.trim()) texts.push(`[PAGE ${i + 1}]\n${text}`);
+    }
+    return texts.length ? texts.join('\n\n') : null;
+  } finally {
+    fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function extractText(buffer, mimeType, filename) {
   const ext = path.extname(filename || '').toLowerCase();
 
@@ -86,10 +173,21 @@ async function extractText(buffer, mimeType, filename) {
     if (mimeType === 'application/pdf' || ext === '.pdf') {
       // Lazy-required: keeps this an optional dependency for installs that
       // never touch the AI drafting path.
-      const pdfParse = require('pdf-parse');
-      const result = await pdfParse(buffer);
-      if (result.text && result.text.trim()) return result.text;
-      // No text layer - likely a scanned document. Fall back to OCR.
+      // pdf-parse's bundled pdfjs can outright throw on some real-world PDFs
+      // (seen: "bad XRef entry" on files from more modern PDF writers, not
+      // just genuinely corrupt files) - that used to skip straight past the
+      // OCR fallback below and silently return null. Treat a thrown parse
+      // the same as "no text layer": still worth trying OCR before giving up.
+      let parsedText = null;
+      try {
+        const pdfParse = require('pdf-parse');
+        const result = await pdfParse(buffer);
+        if (result.text && result.text.trim()) parsedText = result.text;
+      } catch (e) {
+        console.error(`pdf-parse failed for ${filename} (falling back to OCR):`, e.message);
+      }
+      if (parsedText) return parsedText;
+      // No text layer, or pdf-parse couldn't read it at all - fall back to OCR.
       return await ocrPdfBuffer(buffer).catch((e) => {
         console.error(`OCR fallback failed for ${filename}:`, e.message);
         return null;
@@ -123,4 +221,4 @@ async function extractText(buffer, mimeType, filename) {
   }
 }
 
-module.exports = { extractText };
+module.exports = { extractText, extractTextWithPages };

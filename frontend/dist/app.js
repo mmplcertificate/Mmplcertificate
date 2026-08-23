@@ -609,8 +609,148 @@
     });
   }
 
+  // ---------- Tender scan (smart NIT analysis) ----------
+  // Drop/choose a tender document -> Gemini reads it and reports which
+  // certificates and/or MRL the statutory auditor needs to issue, each with
+  // a page reference and supporting quote -> the user picks which to
+  // actually prepare -> one draft_requests row per pick, all sharing the
+  // same uploaded file (via nit_file_id) rather than re-uploading per pick.
+  // Shared between the admin "Client Requests" tab and the client portal so
+  // both get the same experience.
+  function renderTenderScanPanel(main, opts) {
+    opts = opts || {};
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = `
+      <h2>Scan a tender document</h2>
+      <p class="muted">Drop or choose the tender (NIT) file — Gemini reads it and lists which certificates and/or MRL the statutory auditor needs to issue, with page references. Review the list, then pick which ones to prepare.</p>
+      <div class="dropzone" id="tenderDropzone">
+        <p>Drag &amp; drop the tender document here, or</p>
+        <input type="file" id="tenderScanFile" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.txt" />
+      </div>
+      <div id="tenderScanStatus" class="muted" style="margin-top:0.5rem;"></div>
+      <div id="tenderScanResults"></div>
+    `;
+    main.appendChild(panel);
+
+    const dropzone = panel.querySelector('#tenderDropzone');
+    const fileInput = panel.querySelector('#tenderScanFile');
+    const statusEl = panel.querySelector('#tenderScanStatus');
+    const resultsEl = panel.querySelector('#tenderScanResults');
+
+    ['dragenter', 'dragover'].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+      })
+    );
+    ['dragleave', 'drop'].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+      })
+    );
+    dropzone.addEventListener('drop', (e) => {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) runScan(file);
+    });
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (file) runScan(file);
+    });
+
+    async function runScan(file) {
+      resultsEl.innerHTML = '';
+      statusEl.textContent = `Reading ${file.name} and asking Gemini which certificates this tender requires…`;
+      const fd = new FormData();
+      fd.append('file', file);
+      let data;
+      try {
+        const res = await fetch('/api/draft-requests/analyze', { method: 'POST', credentials: 'include', body: fd });
+        data = await res.json().catch(() => ({}));
+        statusEl.textContent = '';
+        if (!res.ok) {
+          resultsEl.innerHTML = `<p class="error">${data.error || 'Scan failed.'}</p>`;
+          return;
+        }
+      } catch (e) {
+        statusEl.textContent = '';
+        resultsEl.innerHTML = `<p class="error">Scan failed: ${e.message}</p>`;
+        return;
+      }
+
+      if (data.error) {
+        resultsEl.innerHTML = `<p class="error">${data.error}</p>`;
+      }
+
+      if (!data.requirements || data.requirements.length === 0) {
+        resultsEl.innerHTML +=
+          '<div class="empty-state">No statutory-auditor certificates or MRL were clearly identified in this document. You can still submit a request manually below.</div>';
+        return;
+      }
+
+      const list = document.createElement('div');
+      list.innerHTML = `<h3 style="margin-bottom:0.25rem;">Gemini found ${data.requirements.length} requirement${
+        data.requirements.length === 1 ? '' : 's'
+      } — review and pick which to prepare:</h3>`;
+      data.requirements.forEach((r, idx) => {
+        const row = document.createElement('label');
+        row.style.cssText =
+          'display:block; border:1px solid var(--border); border-radius:8px; padding:0.6rem 0.8rem; margin:0.5rem 0; cursor:pointer;';
+        row.innerHTML = `
+          <input type="checkbox" data-req-idx="${idx}" checked style="margin-right:0.5rem;" />
+          <strong>${r.is_mrl ? 'MRL' : r.category}</strong>
+          ${r.page_reference ? `<span class="badge" style="background:#eff6ff;color:#1d4ed8;margin-left:0.4rem;">${r.page_reference}</span>` : ''}
+          ${r.quote ? `<div class="muted" style="margin-top:0.25rem;">&ldquo;${r.quote}&rdquo;</div>` : ''}
+          ${r.reasoning ? `<div class="muted" style="margin-top:0.15rem;">${r.reasoning}</div>` : ''}
+        `;
+        list.appendChild(row);
+      });
+
+      const submitBtn = document.createElement('button');
+      submitBtn.className = 'btn primary';
+      submitBtn.textContent = 'Prepare selected';
+      submitBtn.style.marginTop = '0.5rem';
+      submitBtn.addEventListener('click', async () => {
+        const checked = Array.from(list.querySelectorAll('input[data-req-idx]:checked')).map(
+          (cb) => data.requirements[Number(cb.dataset.reqIdx)]
+        );
+        if (checked.length === 0) return toast('Select at least one certificate first.');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting…';
+        let ok = 0;
+        for (const r of checked) {
+          try {
+            const fd2 = new FormData();
+            fd2.append('request_type', r.is_mrl ? 'mrl' : 'certificate');
+            fd2.append('category', r.is_mrl ? '' : r.category);
+            fd2.append(
+              'notes',
+              [r.reasoning, r.page_reference ? `(${r.page_reference})` : ''].filter(Boolean).join(' ')
+            );
+            fd2.append('nit_file_id', data.nit_file_id);
+            // eslint-disable-next-line no-await-in-loop
+            const res2 = await fetch('/api/draft-requests', { method: 'POST', credentials: 'include', body: fd2 });
+            if (res2.ok) ok += 1;
+          } catch (e) {
+            // continue with the rest
+          }
+        }
+        toast(`${ok} of ${checked.length} request${checked.length === 1 ? '' : 's'} submitted.`);
+        fileInput.value = '';
+        if (opts.onSubmitted) opts.onSubmitted();
+      });
+
+      resultsEl.innerHTML = '';
+      resultsEl.appendChild(list);
+      resultsEl.appendChild(submitBtn);
+    }
+  }
+
   // ---------- Client Requests (admin) ----------
   async function renderClientRequestsAdmin(main) {
+    renderTenderScanPanel(main, { onSubmitted: renderActiveTab });
+
     const submitPanel = document.createElement('div');
     submitPanel.className = 'panel';
     submitPanel.innerHTML = `
@@ -695,10 +835,14 @@
   // ---------- Client portal ----------
   async function renderClientPortal() {
     const main = document.getElementById('clientMainContent');
-    main.innerHTML = '<div class="panel"><h2>Submit a request</h2></div>';
-    const formPanel = main.querySelector('.panel');
+    main.innerHTML = '';
+    renderTenderScanPanel(main, { onSubmitted: renderClientPortal });
+
+    const formPanel = document.createElement('div');
+    formPanel.className = 'panel';
+    main.appendChild(formPanel);
     formPanel.innerHTML = `
-      <h2>Submit a request</h2>
+      <h2>Submit a request manually</h2>
       <form id="clientRequestForm">
         <label>Type
           <select id="reqType"><option value="certificate">Certificate</option><option value="mrl">MRL</option></select>
