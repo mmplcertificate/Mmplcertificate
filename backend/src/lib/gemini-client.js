@@ -8,6 +8,19 @@
 // so this doesn't need to be updated by hand as new models ship.
 const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 const TIMEOUT_MS = 30000;
+// 503 ("model overloaded, spikes are usually temporary" - Google's own
+// wording) and 429 (rate limited) are the two statuses Google's docs call
+// out as retry-worthy; a couple of short-backoff retries turns most of
+// these transient blips into a success instead of a manual re-click.
+// Anything else (400, 401/403, 404 bad model name, etc.) is not retried -
+// retrying a bad request just wastes the retry budget on a guaranteed fail.
+const RETRYABLE_STATUSES = new Set([503, 429]);
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1500;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function generate(prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -15,10 +28,29 @@ async function generate(prompt) {
     throw new Error('GEMINI_API_KEY is not set');
   }
 
-  // Auth via the 'X-goog-api-key' header, not a '?key=' query param - matches
-  // AI Studio's own generated quickstart, and is the right way to send the
-  // newer "auth key" format (keys created in AI Studio today, prefixed
-  // "AQ." rather than the older "AIza..." API-key format).
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await generateOnce(prompt, apiKey);
+    } catch (e) {
+      lastError = e;
+      if (e.retryableStatus && attempt < MAX_ATTEMPTS) {
+        console.error(`Gemini API attempt ${attempt}/${MAX_ATTEMPTS} failed (${e.message}) - retrying in ${RETRY_DELAY_MS}ms`);
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(RETRY_DELAY_MS * attempt);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError;
+}
+
+// Auth via the 'X-goog-api-key' header, not a '?key=' query param - matches
+// AI Studio's own generated quickstart, and is the right way to send the
+// newer "auth key" format (keys created in AI Studio today, prefixed
+// "AQ." rather than the older "AIza..." API-key format).
+async function generateOnce(prompt, apiKey) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -36,7 +68,9 @@ async function generate(prompt) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`Gemini API returned ${res.status}: ${body.slice(0, 300)}`);
+      const err = new Error(`Gemini API returned ${res.status}: ${body.slice(0, 300)}`);
+      if (RETRYABLE_STATUSES.has(res.status)) err.retryableStatus = res.status;
+      throw err;
     }
 
     const data = await res.json();
