@@ -13,7 +13,12 @@
     <h1>MMPL Dashboard</h1>
     <p class="muted">Sign in to continue</p>
     <label>Username<input type="text" id="loginUsername" autocomplete="username" required /></label>
-    <label>Password<input type="password" id="loginPassword" autocomplete="current-password" required /></label>
+    <label>Password
+      <span class="password-field">
+        <input type="password" id="loginPassword" autocomplete="current-password" required />
+        <button type="button" id="togglePassword" class="password-toggle" aria-label="Show password">👁</button>
+      </span>
+    </label>
     <button type="submit">Sign in</button>
     <p id="loginError" class="error" hidden></p>
   </form>

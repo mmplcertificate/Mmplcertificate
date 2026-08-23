@@ -86,6 +86,17 @@
     return false;
   }
 
+  const togglePasswordBtn = document.getElementById('togglePassword');
+  if (togglePasswordBtn) {
+    togglePasswordBtn.addEventListener('click', () => {
+      const pwInput = document.getElementById('loginPassword');
+      const showing = pwInput.type === 'text';
+      pwInput.type = showing ? 'password' : 'text';
+      togglePasswordBtn.textContent = showing ? '👁' : '🙈';
+      togglePasswordBtn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    });
+  }
+
   document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = document.getElementById('loginUsername').value.trim();
@@ -99,13 +110,26 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       }).then(async (res) => {
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Login failed');
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const msg = body.error || (res.status === 401 ? 'Incorrect username or password.' : `Login failed (server responded ${res.status}).`);
+          throw new Error(msg);
+        }
         return res.json();
       });
       state.me = me;
       routeToShell();
     } catch (err) {
-      errEl.textContent = err.message;
+      // A free-tier host that's been idle can take 30-50s to wake up, and
+      // during that window fetch() often fails outright (network error /
+      // TypeError) rather than returning a real HTTP response - surface
+      // that distinctly from a normal "wrong password" rejection so it's
+      // clear a retry is what's needed, not different credentials.
+      if (err instanceof TypeError) {
+        errEl.textContent = 'Could not reach the server. If this app has been idle, it can take up to 50 seconds to wake up - please wait a bit and try again.';
+      } else {
+        errEl.textContent = err.message;
+      }
       errEl.hidden = false;
     }
   });
@@ -610,7 +634,7 @@
         <div>
           ${r.nit_file_id ? `<span class="muted">NIT uploaded</span>` : ''}
           ${r.status === 'pending' ? `<button class="btn small" data-review="${r.id}">Mark in review</button>` : ''}
-          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : '<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span><button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>'}
+          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : `<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span><button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>`}
         </div>`;
       panel.appendChild(card);
       const reviewBtn = card.querySelector('[data-review]');

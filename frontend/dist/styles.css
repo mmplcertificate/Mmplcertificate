@@ -56,6 +56,15 @@ body {
 .error { color: var(--danger); font-size: 0.85rem; }
 .muted { color: var(--muted); font-size: 0.85rem; }
 
+.password-field { position: relative; display: flex; }
+.password-field input { flex: 1; padding-right: 2.4rem; }
+.login-card .password-toggle {
+  position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%);
+  margin: 0; padding: 0.2rem 0.4rem; border: none; background: transparent;
+  color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 4px;
+}
+.login-card .password-toggle:hover { background: var(--border); }
+
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 1.5rem; background: var(--panel); border-bottom: 1px solid var(--border);

@@ -1,0 +1,98 @@
+diff --git a/frontend/dist/app.js b/frontend/dist/app.js
+index 6ed2b98..79f4bcd 100644
+--- a/frontend/dist/app.js
++++ b/frontend/dist/app.js
+@@ -86,6 +86,17 @@
+     return false;
+   }
+ 
++  const togglePasswordBtn = document.getElementById('togglePassword');
++  if (togglePasswordBtn) {
++    togglePasswordBtn.addEventListener('click', () => {
++      const pwInput = document.getElementById('loginPassword');
++      const showing = pwInput.type === 'text';
++      pwInput.type = showing ? 'password' : 'text';
++      togglePasswordBtn.textContent = showing ? '👁' : '🙈';
++      togglePasswordBtn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
++    });
++  }
++
+   document.getElementById('loginForm').addEventListener('submit', async (e) => {
+     e.preventDefault();
+     const username = document.getElementById('loginUsername').value.trim();
+@@ -99,13 +110,26 @@
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ username, password }),
+       }).then(async (res) => {
+-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Login failed');
++        if (!res.ok) {
++          const body = await res.json().catch(() => ({}));
++          const msg = body.error || (res.status === 401 ? 'Incorrect username or password.' : `Login failed (server responded ${res.status}).`);
++          throw new Error(msg);
++        }
+         return res.json();
+       });
+       state.me = me;
+       routeToShell();
+     } catch (err) {
+-      errEl.textContent = err.message;
++      // A free-tier host that's been idle can take 30-50s to wake up, and
++      // during that window fetch() often fails outright (network error /
++      // TypeError) rather than returning a real HTTP response - surface
++      // that distinctly from a normal "wrong password" rejection so it's
++      // clear a retry is what's needed, not different credentials.
++      if (err instanceof TypeError) {
++        errEl.textContent = 'Could not reach the server. If this app has been idle, it can take up to 50 seconds to wake up - please wait a bit and try again.';
++      } else {
++        errEl.textContent = err.message;
++      }
+       errEl.hidden = false;
+     }
+   });
+@@ -610,7 +634,7 @@
+         <div>
+           ${r.nit_file_id ? `<span class="muted">NIT uploaded</span>` : ''}
+           ${r.status === 'pending' ? `<button class="btn small" data-review="${r.id}">Mark in review</button>` : ''}
+-          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : '<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span><button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>'}
++          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : `<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span><button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>`}
+         </div>`;
+       panel.appendChild(card);
+       const reviewBtn = card.querySelector('[data-review]');
+diff --git a/frontend/dist/index.html b/frontend/dist/index.html
+index 344e265..b7b096a 100644
+--- a/frontend/dist/index.html
++++ b/frontend/dist/index.html
+@@ -13,7 +13,12 @@
+     <h1>MMPL Dashboard</h1>
+     <p class="muted">Sign in to continue</p>
+     <label>Username<input type="text" id="loginUsername" autocomplete="username" required /></label>
+-    <label>Password<input type="password" id="loginPassword" autocomplete="current-password" required /></label>
++    <label>Password
++      <span class="password-field">
++        <input type="password" id="loginPassword" autocomplete="current-password" required />
++        <button type="button" id="togglePassword" class="password-toggle" aria-label="Show password">👁</button>
++      </span>
++    </label>
+     <button type="submit">Sign in</button>
+     <p id="loginError" class="error" hidden></p>
+   </form>
+diff --git a/frontend/dist/styles.css b/frontend/dist/styles.css
+index 97a1974..50e58bb 100644
+--- a/frontend/dist/styles.css
++++ b/frontend/dist/styles.css
+@@ -56,6 +56,15 @@ body {
+ .error { color: var(--danger); font-size: 0.85rem; }
+ .muted { color: var(--muted); font-size: 0.85rem; }
+ 
++.password-field { position: relative; display: flex; }
++.password-field input { flex: 1; padding-right: 2.4rem; }
++.login-card .password-toggle {
++  position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%);
++  margin: 0; padding: 0.2rem 0.4rem; border: none; background: transparent;
++  color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 4px;
++}
++.login-card .password-toggle:hover { background: var(--border); }
++
+ .topbar {
+   display: flex; align-items: center; justify-content: space-between;
+   padding: 1rem 1.5rem; background: var(--panel); border-bottom: 1px solid var(--border);

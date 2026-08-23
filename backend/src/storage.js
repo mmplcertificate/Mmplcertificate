@@ -74,4 +74,35 @@ function keyForHash(sha256, originalName) {
   return `files/${sha256.slice(0, 2)}/${sha256}${ext}`;
 }
 
-module.exports = { putObject, getObject, deleteObject, sha256Buffer, keyForHash, S3_BUCKET };
+// Lists everything under a key prefix (e.g. 'backups') - used by
+// scripts/backup-db.js to find and prune old nightly backups. Returns
+// {key, lastModified, size} with `key` relative the same way putObject/
+// getObject take it (no S3_PREFIX or bucket baked in), so a caller never
+// needs to know which storage mode is active.
+async function listObjects(prefix) {
+  if (S3_BUCKET) {
+    const client = getS3();
+    const fullPrefix = `${S3_PREFIX}/${prefix}`;
+    const out = [];
+    let ContinuationToken;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await client.send(
+        new s3Mods.ListObjectsV2Command({ Bucket: S3_BUCKET, Prefix: fullPrefix, ContinuationToken })
+      );
+      for (const obj of res.Contents || []) {
+        out.push({ key: obj.Key.slice(S3_PREFIX.length + 1), lastModified: obj.LastModified, size: obj.Size });
+      }
+      ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+    return out;
+  }
+  const fullPath = path.join(LOCAL_ROOT, prefix);
+  if (!fs.existsSync(fullPath)) return [];
+  return fs.readdirSync(fullPath).map((name) => {
+    const st = fs.statSync(path.join(fullPath, name));
+    return { key: `${prefix}/${name}`, lastModified: st.mtime, size: st.size };
+  });
+}
+
+module.exports = { putObject, getObject, deleteObject, listObjects, sha256Buffer, keyForHash, S3_BUCKET };
