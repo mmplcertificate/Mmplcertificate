@@ -7,7 +7,12 @@
 // recommends - it tracks their current stable Flash model automatically,
 // so this doesn't need to be updated by hand as new models ship.
 const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-const TIMEOUT_MS = 30000;
+// 30s was sized for short drafting prompts (a template + one NIT, each
+// capped at 12k chars). analyzeTenderDocument can now send up to ~900k
+// characters of a real multi-hundred-page tender, which takes longer for
+// the model to read - 60s gives that room without changing the fast path
+// for the smaller drafting calls.
+const TIMEOUT_MS = 60000;
 // 503 ("model overloaded, spikes are usually temporary" - Google's own
 // wording) and 429 (rate limited) are the two statuses Google's docs call
 // out as retry-worthy; a couple of short-backoff retries turns most of
@@ -162,7 +167,17 @@ async function analyzeTenderDocument({ text }) {
     `For each one found, use exactly one of these category names if it matches (do not invent variants or abbreviate): ${KNOWN_CATEGORIES.join(', ')}, or "MRL". If a requirement doesn't cleanly match any of these, use "Other Certificate" and explain what it actually is in the reasoning field.`,
     'Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of objects with this exact shape:\n[{"category": "Net Worth Certificate", "page_reference": "Page 4", "quote": "the exact short clause from the document, max ~200 characters", "reasoning": "one sentence on why this certificate is required"}]',
     'If the document does not clearly require any statutory-auditor certificate or MRL, respond with an empty JSON array: []. Do not guess or include anything that is not clearly stated as required - a false positive is worse than a miss here, since a human reviews this list before anything is drafted.',
-    `Tender document text:\n---\n${text.slice(0, 40000)}\n---`,
+    // Real NITs run to hundreds of pages, and the eligibility/qualification
+    // clause that actually names the required certificates is often deep in
+    // the document, not near the front (confirmed on a real 218-page/~527k-
+    // character HCL tender: "Chartered Accountant"/"Statutory Auditor" first
+    // appear around page 44, Shareholding around page 120, Working Capital
+    // around page 206). A short slice here silently hides exactly the
+    // clause this feature exists to find. gemini-flash-latest's context
+    // window is ~1M tokens (~4M characters), so 900k characters (~225k
+    // tokens) comfortably covers the largest real tenders seen so far while
+    // still bounding cost/latency against a pathological upload.
+    `Tender document text:\n---\n${text.slice(0, 900000)}\n---`,
   ].join('\n\n');
 
   const raw = await generate(prompt);

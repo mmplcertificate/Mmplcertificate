@@ -22,6 +22,14 @@
 #  3. Adds 4 blank master templates (from "Certificate Templates") as a
 #     fallback for categories that don't have a real example above.
 #
+# Safe to re-run: before creating anything, it fetches what's already on the
+# server and skips any (category, particulars) pair that already exists, so
+# running this twice in a row (e.g. because a Render redeploy did NOT wipe
+# the free-tier DB in between, which can happen) will not create duplicate
+# certificates. If you deliberately want a full fresh copy, wipe the DB
+# first (any push triggers a Render redeploy, which normally does this)
+# before re-running.
+#
 # This is a ONE-TIME script for the temporary Render trial. Real production
 # migration (with persistent storage) will happen properly once AWS is live.
 
@@ -68,6 +76,17 @@ def login():
     return session
 
 
+def fetch_existing_keys(session):
+    """(category, particulars) pairs already on the server, so re-running
+    this script doesn't create duplicate certificates."""
+    res = session.get(f"{BASE}/api/certificates")
+    if not res.ok:
+        print(f"Warning: could not fetch existing certificates ({res.status_code}) - dedup disabled for this run.", file=sys.stderr)
+        return set()
+    rows = res.json()
+    return {(row.get("category") or "", row.get("particulars") or "") for row in rows}
+
+
 def create_certificate(session, body):
     res = session.post(f"{BASE}/api/certificates", json=body)
     if not res.ok:
@@ -88,15 +107,26 @@ def attach_document(session, cert_id, file_path, display_name):
 def main():
     print("Logging in as admin...")
     session = login()
-    print("Logged in.\n")
+    print("Logged in.")
+
+    existing = fetch_existing_keys(session)
+    if existing:
+        print(f"Found {len(existing)} certificates already on the server - duplicates will be skipped.\n")
+    else:
+        print("Server currently has no certificates (or dedup check failed) - migrating everything.\n")
 
     # --- Part 1: full certificate metadata (139 records) ---
     raw = json.loads(DATA_JSON.read_text(encoding="utf-8"))
     certs = raw.get("certificates", [])
     print(f"Part 1: migrating {len(certs)} certificate records (metadata only)...")
     n = 0
+    skipped1 = 0
     failed1 = 0
     for c in certs:
+        key = (c.get("category") or "", c.get("particulars") or "")
+        if key in existing:
+            skipped1 += 1
+            continue
         try:
             create_certificate(session, {
                 "stage": c.get("stage") or "in_progress",
@@ -115,19 +145,25 @@ def main():
                 "bill_date": c.get("bill_date"),
                 "notes": c.get("notes"),
             })
+            existing.add(key)
             n += 1
             if n % 20 == 0:
                 print(f"  {n}/{len(certs)}")
         except Exception as e:
             failed1 += 1
             print(f'  FAILED on "{c.get("particulars") or c.get("id")}": {e}')
-    print(f"Part 1 done: {n} migrated, {failed1} failed.\n")
+    print(f"Part 1 done: {n} migrated, {skipped1} already existed (skipped), {failed1} failed.\n")
 
     # --- Part 2: real signed/draft certificates as drafting templates ---
     print(f"Part 2: attaching {len(PICKS)} real template documents...")
     m = 0
+    skipped2 = 0
     failed2 = 0
     for p in PICKS:
+        key = (p["category"], p["engagement"])
+        if key in existing:
+            skipped2 += 1
+            continue
         file_path = MMPL_ROOT / p["file"]
         if not file_path.exists():
             print(f"  MISSING, skipping: {file_path}")
@@ -142,17 +178,24 @@ def main():
                 "notes": f'Real template migrated for Gemini drafting testing (source engagement: {p["engagement"]})',
             })
             attach_document(session, cert["id"], file_path, file_path.name)
+            existing.add(key)
             m += 1
             print(f'  [{m}/{len(PICKS)}] {p["category"]} <- {p["engagement"]}')
         except Exception as e:
             failed2 += 1
             print(f'  FAILED on "{p["engagement"]}": {e}')
-    print(f"Part 2 done: {m} attached, {failed2} failed/missing.\n")
+    print(f"Part 2 done: {m} attached, {skipped2} already existed (skipped), {failed2} failed/missing.\n")
 
     # --- Part 3: blank master templates as a category fallback ---
     print("Part 3: attaching blank master templates...")
     k = 0
+    skipped3 = 0
     for fname, cat in BLANK_TEMPLATES:
+        particulars = f"Master blank template - {cat}"
+        key = (cat, particulars)
+        if key in existing:
+            skipped3 += 1
+            continue
         file_path = TEMPLATES_DIR / fname
         if not file_path.exists():
             print(f"  MISSING, skipping: {file_path}")
@@ -162,15 +205,16 @@ def main():
                 "stage": "billed",
                 "category": cat,
                 "client": "MMPL Private Limited",
-                "particulars": f"Master blank template - {cat}",
+                "particulars": particulars,
                 "notes": "Blank master template migrated for Gemini drafting testing.",
             })
             attach_document(session, cert["id"], file_path, fname)
+            existing.add(key)
             k += 1
             print(f"  attached: {cat}")
         except Exception as e:
             print(f'  FAILED on "{cat}": {e}')
-    print(f"Part 3 done: {k} blank templates attached.\n")
+    print(f"Part 3 done: {k} blank templates attached, {skipped3} already existed (skipped).\n")
 
     print("All done. Log into the dashboard and check the certificates list.")
 
