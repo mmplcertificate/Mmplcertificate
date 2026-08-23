@@ -7,17 +7,30 @@
 // so this only does category-keyword matching against past CERTIFICATE-stage
 // records, plus a separate MRL-matching branch for the client flow.
 
+// Keys here MUST match the certificate `category` values used throughout the
+// app (see category_list in certificates_data.json / the certificate form),
+// e.g. "Net Worth Certificate" - NOT a short form like "Net Worth". This used
+// to be a short form, which meant findBestTemplate()'s exact-match check
+// against real certificate.category values ("Net Worth Certificate", etc.)
+// could never succeed - template matching silently found nothing for every
+// category, even with a full set of correctly-categorized past certificates
+// on file. Fixed 2026-08-23.
+//
+// "No CDR Certificate" is listed before "CDR Certificate" on purpose: text
+// containing "no cdr" also contains the substring "cdr", so if the generic
+// CDR check ran first it would misfire on "No CDR" text before the more
+// specific check ever got a turn.
 const CATEGORY_KEYWORDS = {
-  'Net Worth': ['net worth', 'networth'],
-  Turnover: ['turnover'],
-  'Local Content': ['local content', 'local value addition', 'lva'],
-  CDR: ['cdr', 'corporate debt restructuring'],
-  'No CDR': ['no cdr'],
-  Shareholding: ['shareholding', 'shareholder'],
-  'Working Capital': ['working capital'],
-  Solvency: ['solvency'],
-  'Total Income': ['total income'],
-  'Audit-Under-Process': ['audit under process', 'audit-under-process', 'under process'],
+  'No CDR Certificate': ['no cdr'],
+  'CDR Certificate': ['cdr', 'corporate debt restructuring'],
+  'Net Worth Certificate': ['net worth', 'networth'],
+  'Turnover Certificate': ['turnover'],
+  'Local Content Certificate': ['local content', 'local value addition', 'lva'],
+  'Shareholding Certificate': ['shareholding', 'shareholder'],
+  'Working Capital Certificate': ['working capital'],
+  'Solvency Certificate': ['solvency'],
+  'Total Income Certificate': ['total income'],
+  'Audit Under Process Certificate': ['audit under process', 'audit-under-process', 'under process'],
   MRL: ['mrl', 'manufacturer relationship letter', 'manufacturer authorization'],
 };
 
