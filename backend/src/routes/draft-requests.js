@@ -26,8 +26,24 @@ const { notifyNewDraftRequest } = require('../lib/notify');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// Client submits a new request (NIT upload + auto-template-match).
-router.post('/', requireRole('client'), upload.single('nit'), async (req, res) => {
+// Submit a new request (NIT upload + auto-template-match). Clients always
+// use this to reach Akash; admin/team can also submit here themselves -
+// e.g. to test how the matching/drafting pipeline behaves on a real NIT
+// without needing a separate client login.
+router.post(
+  '/',
+  requireRole('client', 'admin', 'team'),
+  (req, res, next) => {
+    // Team members need the 'drafting' permission (same one that gates the
+    // Client Requests tab) to submit a test request. Admin and client
+    // always pass this check.
+    if (req.user.role === 'team' && !(req.user.permissions && req.user.permissions.drafting)) {
+      return res.status(403).json({ error: 'Missing permission: drafting' });
+    }
+    next();
+  },
+  upload.single('nit'),
+  async (req, res) => {
   const { request_type, category, notes } = req.body || {};
   if (!request_type) return res.status(400).json({ error: 'request_type is required' });
 
@@ -92,8 +108,9 @@ router.post('/', requireRole('client'), upload.single('nit'), async (req, res) =
     autoDrafted: !!finalRow.auto_drafted,
   });
 
-  res.status(201).json(finalRow);
-});
+    res.status(201).json(finalRow);
+  }
+);
 
 // Attempts to draft the request automatically via Gemini and deliver it to
 // the client right away. Any failure here is caught and recorded on the row
@@ -166,11 +183,17 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
   }
 }
 
-// Client downloads the delivered result of their own request.
-router.get('/:id/result', requireRole('client'), async (req, res) => {
-  const request = db
-    .prepare('SELECT * FROM draft_requests WHERE id = ? AND submitted_by_user_id = ?')
-    .get(req.params.id, req.user.id);
+// Downloads the delivered result of a request. Clients can only fetch their
+// own; admin/team (with the 'drafting' permission) can fetch any - they can
+// already see every request via GET '/', this just lets them grab the file.
+router.get('/:id/result', requireRole('client', 'admin', 'team'), async (req, res) => {
+  if (req.user.role === 'team' && !(req.user.permissions && req.user.permissions.drafting)) {
+    return res.status(403).json({ error: 'Missing permission: drafting' });
+  }
+  const request =
+    req.user.role === 'client'
+      ? db.prepare('SELECT * FROM draft_requests WHERE id = ? AND submitted_by_user_id = ?').get(req.params.id, req.user.id)
+      : db.prepare('SELECT * FROM draft_requests WHERE id = ?').get(req.params.id);
   if (!request || !request.result_file_id) return res.status(404).json({ error: 'Not found' });
   const file = db.prepare('SELECT * FROM file_library WHERE id = ?').get(request.result_file_id);
   try {

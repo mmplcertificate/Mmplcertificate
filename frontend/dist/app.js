@@ -611,6 +611,35 @@
 
   // ---------- Client Requests (admin) ----------
   async function renderClientRequestsAdmin(main) {
+    const submitPanel = document.createElement('div');
+    submitPanel.className = 'panel';
+    submitPanel.innerHTML = `
+      <h2>Submit a test request</h2>
+      <p class="muted">Submit a NIT yourself to see how matching &amp; drafting works — the same pipeline clients use.</p>
+      <form id="adminRequestForm">
+        <label>Type
+          <select id="adminReqType"><option value="certificate">Certificate</option><option value="mrl">MRL</option></select>
+        </label><br/>
+        <label>Category (optional)<input type="text" id="adminReqCategory" /></label><br/>
+        <label>Notice Inviting Tender (NIT) file<input type="file" id="adminReqFile" /></label><br/>
+        <label>Notes<textarea id="adminReqNotes"></textarea></label><br/>
+        <button class="btn primary" type="submit">Submit request</button>
+      </form>`;
+    main.appendChild(submitPanel);
+    submitPanel.querySelector('#adminRequestForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData();
+      fd.append('request_type', submitPanel.querySelector('#adminReqType').value);
+      fd.append('category', submitPanel.querySelector('#adminReqCategory').value);
+      fd.append('notes', submitPanel.querySelector('#adminReqNotes').value);
+      const file = submitPanel.querySelector('#adminReqFile').files[0];
+      if (file) fd.append('nit', file);
+      const res = await fetch('/api/draft-requests', { method: 'POST', credentials: 'include', body: fd });
+      if (!res.ok) return toast('Failed to submit request.');
+      toast('Request submitted.');
+      renderActiveTab();
+    });
+
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = '<h2>Client Requests</h2><p class="muted">Loading...</p>';
@@ -634,7 +663,7 @@
         <div>
           ${r.nit_file_id ? `<span class="muted">NIT uploaded</span>` : ''}
           ${r.status === 'pending' ? `<button class="btn small" data-review="${r.id}">Mark in review</button>` : ''}
-          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : `<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span><button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>`}
+          ${r.status !== 'delivered' ? `<button class="btn small" data-deliver="${r.id}">Upload & deliver</button>` : `<span class="muted">Delivered${r.auto_drafted ? ' (by AI)' : ''} — </span>${r.result_file_id ? `<a class="btn small" href="/api/draft-requests/${r.id}/result" target="_blank">Download draft</a> ` : ''}<button class="btn small" data-deliver="${r.id}">Replace with your own draft</button>`}
         </div>`;
       panel.appendChild(card);
       const reviewBtn = card.querySelector('[data-review]');
