@@ -250,6 +250,9 @@ echo " Fully-automated client drafting (client submits an NIT and gets a draft"
 echo " back with no review step) is OFF by default - see the 'GEMINI_API_KEY'"
 echo " instructions in the application output above to turn it on. Until then,"
 echo " every client request queues for you to draft and deliver by hand."
+echo ""
+echo " Email alerts on new client requests are also OFF by default - see the"
+echo " 'GMAIL_USER' / 'GMAIL_APP_PASSWORD' instructions above to turn them on."
 echo "=================================================="
 '''
 

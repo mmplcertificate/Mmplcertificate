@@ -12,10 +12,12 @@ S3_BUCKET="$2"
 echo "== Installing Node.js 20 =="
 curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - || \
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+# poppler-utils provides pdftoppm, used to rasterize scanned PDFs for OCR
+# (document-text.js's fallback when a PDF has no extractable text layer).
 if command -v dnf >/dev/null 2>&1; then
-  dnf install -y nodejs nginx
+  dnf install -y nodejs nginx poppler-utils
 elif command -v apt-get >/dev/null 2>&1; then
-  apt-get install -y nodejs nginx
+  apt-get install -y nodejs nginx poppler-utils
 fi
 
 echo "== Unpacking application =="
@@ -101,3 +103,15 @@ echo "  echo 'GEMINI_API_KEY=your-key-here' >> $APP_DIR/backend/.env"
 echo "  systemctl restart mmpl-dashboard"
 echo "Until GEMINI_API_KEY is set, client requests queue for manual review/delivery as before -"
 echo "nothing about drafting changes until you explicitly add the key."
+echo ""
+echo "To turn on email alerts when a client submits a new request (optional):"
+echo "  cat >> $APP_DIR/backend/.env <<ENVEOF"
+echo "  GMAIL_USER=youraddress@gmail.com"
+echo "  GMAIL_APP_PASSWORD=your-16-char-app-password"
+echo "  NOTIFY_EMAIL=where-alerts-should-go@example.com"
+echo "  ENVEOF"
+echo "  systemctl restart mmpl-dashboard"
+echo "GMAIL_APP_PASSWORD is a Google 'App Password' (Google Account -> Security ->"
+echo "2-Step Verification -> App passwords), NOT your normal Gmail password. NOTIFY_EMAIL"
+echo "is optional and defaults to GMAIL_USER if omitted. Until both GMAIL_USER and"
+echo "GMAIL_APP_PASSWORD are set, this is a silent no-op - nothing changes."

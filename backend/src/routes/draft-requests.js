@@ -21,6 +21,7 @@ const { requireRole, requirePermission, logAudit } = require('../auth');
 const { matchFromText } = require('../lib/template-matcher');
 const { extractText } = require('../lib/document-text');
 const { draftFromTemplate } = require('../lib/gemini-client');
+const { notifyNewDraftRequest } = require('../lib/notify');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -78,7 +79,20 @@ router.post('/', requireRole('client'), upload.single('nit'), async (req, res) =
     });
   }
 
-  res.status(201).json(db.prepare('SELECT * FROM draft_requests WHERE id = ?').get(info.lastInsertRowid));
+  const finalRow = db.prepare('SELECT * FROM draft_requests WHERE id = ?').get(info.lastInsertRowid);
+
+  // Fire-and-forget: never await this, and notifyNewDraftRequest never
+  // rejects - an email server being slow or down must never delay or break
+  // the client's own request submission.
+  notifyNewDraftRequest({
+    id: finalRow.id,
+    requestType: finalRow.request_type,
+    category: finalRow.category,
+    submittedBy: req.user.username,
+    autoDrafted: !!finalRow.auto_drafted,
+  });
+
+  res.status(201).json(finalRow);
 });
 
 // Attempts to draft the request automatically via Gemini and deliver it to
