@@ -4,3 +4,4 @@ storage/*
 !storage/.gitkeep
 .env
 *.log
+.bin/

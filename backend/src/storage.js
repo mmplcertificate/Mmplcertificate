@@ -11,11 +11,23 @@ const S3_PREFIX = process.env.S3_PREFIX || 'mmpl';
 
 let s3Client = null;
 let s3Mods = null;
+// Set for R2 (or any other S3-compatible, non-AWS provider). Leaving this
+// unset preserves the exact original real-AWS-S3 behavior.
+const S3_ENDPOINT = process.env.S3_ENDPOINT;
 function getS3() {
   if (!s3Client) {
     // Lazy-require so local-disk mode never needs the AWS SDK installed.
     s3Mods = require('@aws-sdk/client-s3');
-    s3Client = new s3Mods.S3Client({ region: process.env.AWS_REGION || 'ap-south-1' });
+    const config = { region: process.env.AWS_REGION || 'ap-south-1' };
+    if (S3_ENDPOINT) {
+      // R2 (and most other S3-compatible services) need an explicit
+      // endpoint, 'auto' region, and path-style addressing instead of
+      // AWS's default virtual-hosted-style bucket subdomains.
+      config.endpoint = S3_ENDPOINT;
+      config.region = process.env.AWS_REGION || 'auto';
+      config.forcePathStyle = true;
+    }
+    s3Client = new s3Mods.S3Client(config);
   }
   return s3Client;
 }

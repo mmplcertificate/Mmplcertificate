@@ -1,0 +1,10 @@
+dbs:
+  - path: data/mmpl.sqlite3
+    replicas:
+      - type: s3
+        endpoint: ${S3_ENDPOINT}
+        bucket: ${LITESTREAM_BUCKET}
+        path: litestream/mmpl-sqlite
+        region: auto
+        access-key-id: ${AWS_ACCESS_KEY_ID}
+        secret-access-key: ${AWS_SECRET_ACCESS_KEY}

@@ -4,7 +4,7 @@
   "description": "MMPL certificates/billing live dashboard - backend",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "bash start.sh",
     "migrate": "node scripts/run-migrations.js"
   },
   "dependencies": {
