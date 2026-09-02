@@ -610,7 +610,7 @@
   }
 
   // ---------- Tender scan (smart NIT analysis) ----------
-  // Drop/choose a tender document -> Gemini reads it and reports which
+  // Drop/choose a tender document -> the AI provider reads it and reports which
   // certificates and/or MRL the statutory auditor needs to issue, each with
   // a page reference and supporting quote -> the user picks which to
   // actually prepare -> one draft_requests row per pick, all sharing the
@@ -623,7 +623,7 @@
     panel.className = 'panel';
     panel.innerHTML = `
       <h2>Scan a tender document</h2>
-      <p class="muted">Drop or choose the tender (NIT) file — Gemini reads it and lists which certificates and/or MRL the statutory auditor needs to issue, with page references. Review the list, then pick which ones to prepare.</p>
+      <p class="muted">Drop or choose the tender (NIT) file — AI reads it and lists which certificates and/or MRL the statutory auditor needs to issue, with page references. Review the list, then pick which ones to prepare.</p>
       <div class="dropzone" id="tenderDropzone">
         <p>Drag &amp; drop the tender document here, or</p>
         <input type="file" id="tenderScanFile" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.txt" />
@@ -661,7 +661,7 @@
 
     async function runScan(file) {
       resultsEl.innerHTML = '';
-      statusEl.textContent = `Reading ${file.name} and asking Gemini which certificates this tender requires…`;
+      statusEl.textContent = `Reading ${file.name} and asking the AI which certificates this tender requires…`;
       const fd = new FormData();
       fd.append('file', file);
       let data;
@@ -690,7 +690,7 @@
       }
 
       const list = document.createElement('div');
-      list.innerHTML = `<h3 style="margin-bottom:0.25rem;">Gemini found ${data.requirements.length} requirement${
+      list.innerHTML = `<h3 style="margin-bottom:0.25rem;">Found ${data.requirements.length} requirement${
         data.requirements.length === 1 ? '' : 's'
       } — review and pick which to prepare:</h3>`;
       data.requirements.forEach((r, idx) => {
