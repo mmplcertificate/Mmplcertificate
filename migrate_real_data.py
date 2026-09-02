@@ -49,7 +49,7 @@ TEMPLATES_DIR = MMPL_ROOT / "Certificate Templates"
 # (walked folder-by-folder, not from the stale per-engagement auto-tags) to
 # exclude anything that was mail/letter correspondence rather than the actual
 # certificate, and to exclude anything too ambiguous to confidently categorize.
-PICKS = json.loads(r"""[{"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate- Harpalpur.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate-Shergaon.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholder Certificate-Harpalpur.pdf", "category": "Shareholding Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholding Certificate-Shergaon Block.pdf", "category": "Shareholding Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Local Content/Local Content Certificate.pdf", "category": "Local Content Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Turnover Certificate/Turnover Certificate.pdf", "category": "Turnover Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Working Capital Certificate/Working Capital certificate.pdf", "category": "Working Capital Certificate"}, {"engagement": "14.04.2026 Solvency Certificate AEO Program", "file": "MMPL AK/14.04.2026 Solvency Certificate AEO Program/Solvency certificate.pdf", "category": "Solvency Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate amdabera.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate khandap.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate Mushanal.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/shareholding certificate amdabera .pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Khandap.pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Mushanal.pdf", "category": "Shareholding Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Networth.pdf", "category": "Net Worth Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Turnover.pdf", "category": "Turnover Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (CDR)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/CDR/CDR_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (Production Shaft)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/Production Shaft/CDR_PS_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "21.03.2026 Gmet_Net Worh", "file": "MMPL AK/21.03.2026 Gmet_Net Worh/Net Worth Certificate Signed GMET.pdf", "category": "Net Worth Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/NO CDR Certificate_Khetri.pdf", "category": "No CDR Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/Turnover Certificate_Khetri.pdf", "category": "Turnover Certificate"}, {"engagement": "26.02.2026 Share holding certificate GOI MOM", "file": "MMPL AK/26.02.2026 Share holding certificate GOI MOM/Signed Shareholding Certificate.pdf", "category": "Shareholding Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Local Content Certificate_001.pdf", "category": "Local Content Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/No CDR Certificate_001.pdf", "category": "No CDR Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Working Capital Certificate_001.pdf", "category": "Working Capital Certificate"}, {"engagement": "30.05.2026 MOIL-ukwa", "file": "MMPL AK/30.05.2026 MOIL-ukwa/MOIL-ukwa/signed certificate Local Content Certificate MOIL .pdf", "category": "Local Content Certificate"}, {"engagement": "GMDC Ambaji Core Drilling Tender (New folder)", "file": "New folder/Signed Certificate Turnover and PL.pdf", "category": "Turnover Certificate"}, {"engagement": "ECL Winder Local Content (New folder (2))", "file": "New folder (2)/ECL_Local_Content_Certificate_MMPL_1.docx", "category": "Local Content Certificate"}]""")
+PICKS = json.loads(r"""[{"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate- Harpalpur.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Net Worth Certificate-Shergaon.pdf", "category": "Net Worth Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Harpalpur)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholder Certificate-Harpalpur.pdf", "category": "Shareholding Certificate"}, {"engagement": "07.05.2026 Shergaon and Harpalpur SH and NW Certificate (Shergaon)", "file": "MMPL AK/07.05.2026 Shergaon and Harpalpur SH and NW Certificate/Signed Certificates/Shareholding Certificate-Shergaon Block.pdf", "category": "Shareholding Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Local Content/Local Content Certificate.pdf", "category": "Local Content Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Turnover Certificate/Turnover Certificate.pdf", "category": "Turnover Certificate"}, {"engagement": "10.03.2026 SHCM Kumaridh", "file": "MMPL AK/10.03.2026 SHCM Kumaridh/Working Capital Certificate/Working Capital certificate.pdf", "category": "Working Capital Certificate"}, {"engagement": "14.04.2026 Solvency Certificate AEO Program", "file": "MMPL AK/14.04.2026 Solvency Certificate AEO Program/Solvency certificate.pdf", "category": "Solvency Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate amdabera.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate khandap.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Networth certificate Mushanal.pdf", "category": "Net Worth Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Amdabera)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/shareholding certificate amdabera .pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Khandap)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Khandap.pdf", "category": "Shareholding Certificate"}, {"engagement": "14.05.2026 3 tender nw and Sh certificate (Mushanal)", "file": "MMPL AK/14.05.2026 3 tender nw and Sh certificate/MMPL Final certificates/Shareholding certificate Mushanal.pdf", "category": "Shareholding Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Networth.pdf", "category": "Net Worth Certificate"}, {"engagement": "16.02.2026 Mineral Exploration Andhra Pradesh", "file": "MMPL AK/16.02.2026 Mineral Exploration Andhra Pradesh/Signed/Turnover.pdf", "category": "Turnover Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (CDR)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/CDR/CDR_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "19.02.2026 HCL CDR certificate and Production shaft (Production Shaft)", "file": "MMPL AK/19.02.2026 HCL CDR certificate and Production shaft/Production Shaft/CDR_PS_HCL_19.02.2026.pdf", "category": "CDR Certificate"}, {"engagement": "21.03.2026 Gmet_Net Worh", "file": "MMPL AK/21.03.2026 Gmet_Net Worh/Net Worth Certificate Signed GMET.pdf", "category": "Net Worth Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/NO CDR Certificate_Khetri.pdf", "category": "No CDR Certificate"}, {"engagement": "21.05.2026 Khetri T.w and NO CDR", "file": "MMPL AK/21.05.2026 Khetri T.w and NO CDR/Turnover Certificate_Khetri.pdf", "category": "Turnover Certificate"}, {"engagement": "26.02.2026 Share holding certificate GOI MOM", "file": "MMPL AK/26.02.2026 Share holding certificate GOI MOM/Signed Shareholding Certificate.pdf", "category": "Shareholding Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "27.05.2026 NLC NW and T.O Certificate", "file": "MMPL AK/27.05.2026 NLC NW and T.O Certificate/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Local Content Certificate_001.pdf", "category": "Local Content Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Net Worth Certificate_001.pdf", "category": "Net Worth Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/No CDR Certificate_001.pdf", "category": "No CDR Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Turnover Certificate_001.pdf", "category": "Turnover Certificate"}, {"engagement": "29.05.2026 Damodar valley 6 Certificates", "file": "MMPL AK/29.05.2026 Damodar valley 6 Certificates/Signed certificates/Working Capital Certificate_001.pdf", "category": "Working Capital Certificate"}, {"engagement": "30.05.2026 MOIL-ukwa", "file": "MMPL AK/30.05.2026 MOIL-ukwa/MOIL-ukwa/signed certificate Local Content Certificate MOIL .pdf", "category": "Local Content Certificate"}, {"engagement": "GMDC Ambaji Core Drilling Tender", "file": "MMPL AK/18.08.2026 GMDC T.o Certificate/Signed Certificate Turnover and PL.pdf", "category": "Turnover Certificate"}, {"engagement": "ECL Winder Local Content", "file": "MMPL AK/19.08.2026 HCL LC/Signed Certificate/Local_Content_ECL.pdf", "category": "Local Content Certificate"}]""")
 
 BLANK_TEMPLATES = [
     ("CDR Certificate.docx", "CDR Certificate"),
@@ -76,15 +76,43 @@ def login():
     return session
 
 
+def template_key(category, particulars):
+    """Loose key used for Part 2/3 (real + blank templates), where
+    particulars is a unique engagement/template label."""
+    return (category or "", particulars or "")
+
+
+def tracker_key(c):
+    """Tighter key used for Part 1 tracker records, where particulars alone
+    can repeat (e.g. generic "Certificates (details as per annexure B)..."
+    text pulled from an invoice line) even though the records are genuinely
+    different certificates. Folding in tender_no/document_date/amount/bill_no
+    makes two rows collide only when they really are the same record."""
+    return (
+        c.get("category") or "",
+        c.get("particulars") or "",
+        c.get("tender_no") or "",
+        c.get("document_date") or "",
+        "" if c.get("amount") is None else str(c.get("amount")),
+        c.get("bill_no") or "",
+    )
+
+
 def fetch_existing_keys(session):
-    """(category, particulars) pairs already on the server, so re-running
-    this script doesn't create duplicate certificates."""
+    """Every already-on-the-server certificate, represented both ways (loose
+    template_key and tight tracker_key), so re-running this script against a
+    non-empty server skips real repeats without merging distinct records
+    that just happen to share the same particulars text."""
     res = session.get(f"{BASE}/api/certificates")
     if not res.ok:
         print(f"Warning: could not fetch existing certificates ({res.status_code}) - dedup disabled for this run.", file=sys.stderr)
-        return set()
+        return set(), 0
     rows = res.json()
-    return {(row.get("category") or "", row.get("particulars") or "") for row in rows}
+    keys = set()
+    for row in rows:
+        keys.add(template_key(row.get("category"), row.get("particulars")))
+        keys.add(tracker_key(row))
+    return keys, len(rows)
 
 
 def create_certificate(session, body):
@@ -109,9 +137,9 @@ def main():
     session = login()
     print("Logged in.")
 
-    existing = fetch_existing_keys(session)
-    if existing:
-        print(f"Found {len(existing)} certificates already on the server - duplicates will be skipped.\n")
+    existing, existing_count = fetch_existing_keys(session)
+    if existing_count:
+        print(f"Found {existing_count} certificates already on the server - real repeats will be skipped.\n")
     else:
         print("Server currently has no certificates (or dedup check failed) - migrating everything.\n")
 
@@ -123,7 +151,7 @@ def main():
     skipped1 = 0
     failed1 = 0
     for c in certs:
-        key = (c.get("category") or "", c.get("particulars") or "")
+        key = tracker_key(c)
         if key in existing:
             skipped1 += 1
             continue
@@ -160,7 +188,7 @@ def main():
     skipped2 = 0
     failed2 = 0
     for p in PICKS:
-        key = (p["category"], p["engagement"])
+        key = template_key(p["category"], p["engagement"])
         if key in existing:
             skipped2 += 1
             continue
@@ -192,7 +220,7 @@ def main():
     skipped3 = 0
     for fname, cat in BLANK_TEMPLATES:
         particulars = f"Master blank template - {cat}"
-        key = (cat, particulars)
+        key = template_key(cat, particulars)
         if key in existing:
             skipped3 += 1
             continue
