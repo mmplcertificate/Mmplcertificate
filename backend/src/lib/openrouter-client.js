@@ -1,25 +1,43 @@
-// Thin wrapper around the Gemini API's REST endpoint (no SDK dependency -
-// Node 20's built-in fetch is enough). Used only when GEMINI_API_KEY is set;
-// every caller must treat a thrown error as "fall back to the manual queue",
-// never as "block the request" - a Gemini outage or a bad key should never
-// stop a client from being able to submit a draft request.
-// 'gemini-flash-latest' is the alias Google's own AI Studio quickstart
-// recommends - it tracks their current stable Flash model automatically,
-// so this doesn't need to be updated by hand as new models ship.
-const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
-// 30s was sized for short drafting prompts (a template + one NIT, each
-// capped at 12k chars). analyzeTenderDocument can now send up to ~900k
-// characters of a real multi-hundred-page tender, which takes longer for
-// the model to read - 60s gives that room without changing the fast path
-// for the smaller drafting calls.
-const TIMEOUT_MS = 60000;
-// 503 ("model overloaded, spikes are usually temporary" - Google's own
-// wording) and 429 (rate limited) are the two statuses Google's docs call
-// out as retry-worthy; a couple of short-backoff retries turns most of
-// these transient blips into a success instead of a manual re-click.
-// Anything else (400, 401/403, 404 bad model name, etc.) is not retried -
-// retrying a bad request just wastes the retry budget on a guaranteed fail.
-const RETRYABLE_STATUSES = new Set([503, 429]);
+// Thin wrapper around OpenRouter's REST endpoint (no SDK dependency - Node's
+// built-in fetch is enough, same philosophy as gemini-client.js). This is an
+// ALTERNATIVE provider, selected via ai-provider.js when AI_PROVIDER=openrouter
+// is set - it is not used unless that env var picks it. Every caller must
+// still treat a thrown error as "fall back to the manual queue", never as
+// "block the request" - same contract as gemini-client.js.
+//
+// Deliberately kept as a self-contained duplicate of gemini-client.js's
+// prompt-building/parsing logic (KNOWN_CATEGORIES, DISCLAIMER, the tuned
+// Net Worth / financial-eligibility prompt guidance, parseRequirementsJson)
+// rather than a shared module, so switching providers can never accidentally
+// change or break the already-verified Gemini path. If the prompt is tuned
+// further after real-world testing (the same way the Net Worth clause fix
+// happened for Gemini), update both files.
+//
+// Free-tier model choice, revised 2026-09-02 after live testing against a
+// real tender document (Tendernotice_1.pdf, ~271k characters):
+//   - nvidia/nemotron-3.5-lightning:free (1M context): ran without errors
+//     but found 0 of the 5 real certificate requirements a plain keyword
+//     search of the same document turned up. Too unreliable for this task.
+//   - thinkingmachines/inkling:free (1M context): rejected outright by
+//     OpenRouter with 403 "only available on agentic harnesses" - not
+//     usable from a plain server-side API call at all.
+//   - inclusionai/ling-3.0-flash-fin:free (262k context, finance-tuned):
+//     found all 5 real requirements (Turnover, Working Capital, Net Worth,
+//     No CDR, Local Content), with correctly-quoted figures and sound
+//     reasoning, in 39.5s. Chosen as the default on that basis. 262k
+//     tokens (~1M characters) still comfortably covers the ~225k-token
+//     worst case that ruled out Gemini's and Groq's free tiers - see the
+//     project status doc's 2026-09-01/02 sessions for the full comparison.
+const MODEL = process.env.OPENROUTER_MODEL || 'inclusionai/ling-3.0-flash-fin:free';
+// Free-tier OpenRouter models can take noticeably longer than Gemini's
+// dedicated infra to chew through a large tender document (seen: aborting
+// at 60s on a ~270k-character document during real-world testing on
+// 2026-09-02), so this is set higher than gemini-client.js's TIMEOUT_MS.
+const TIMEOUT_MS = 180000;
+// OpenRouter's own docs call out 429 (rate limited) as retry-worthy; 503-class
+// upstream-provider errors are also worth a short retry, same reasoning as
+// gemini-client.js's RETRYABLE_STATUSES.
+const RETRYABLE_STATUSES = new Set([429, 502, 503]);
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
 
@@ -28,9 +46,9 @@ function sleep(ms) {
 }
 
 async function generate(prompt) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not set');
+    throw new Error('OPENROUTER_API_KEY is not set');
   }
 
   let lastError;
@@ -40,7 +58,7 @@ async function generate(prompt) {
     } catch (e) {
       lastError = e;
       if (e.retryableStatus && attempt < MAX_ATTEMPTS) {
-        console.error(`Gemini API attempt ${attempt}/${MAX_ATTEMPTS} failed (${e.message}) - retrying in ${RETRY_DELAY_MS}ms`);
+        console.error(`OpenRouter API attempt ${attempt}/${MAX_ATTEMPTS} failed (${e.message}) - retrying in ${RETRY_DELAY_MS}ms`);
         // eslint-disable-next-line no-await-in-loop
         await sleep(RETRY_DELAY_MS * attempt);
         continue;
@@ -51,37 +69,65 @@ async function generate(prompt) {
   throw lastError;
 }
 
-// Auth via the 'X-goog-api-key' header, not a '?key=' query param - matches
-// AI Studio's own generated quickstart, and is the right way to send the
-// newer "auth key" format (keys created in AI Studio today, prefixed
-// "AQ." rather than the older "AIza..." API-key format).
+// OpenRouter's API is OpenAI-compatible chat completions - Bearer auth,
+// POST /api/v1/chat/completions, response text at
+// data.choices[0].message.content. HTTP-Referer/X-Title headers are
+// OpenRouter's own recommended (not required) attribution headers, shown on
+// their own docs and in their dashboard's usage view - harmless to include.
 async function generateOnce(prompt, apiKey) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://mmplcertificate.onrender.com',
+        'X-Title': 'MMPL Certificates & Billing',
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+        model: MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        // Some free "reasoning" models spend part of this budget on hidden
+        // chain-of-thought before writing the actual answer, and a small
+        // cap can burn out entirely on reasoning for a large document -
+        // seen as a fully empty response on a ~459k-character tender during
+        // real-world testing on 2026-09-02 (max_tokens was 4096 then).
+        // Raised well above what the JSON answer itself could ever need.
+        max_tokens: 16000,
       }),
       signal: controller.signal,
     });
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      const err = new Error(`Gemini API returned ${res.status}: ${body.slice(0, 300)}`);
+      const err = new Error(`OpenRouter API returned ${res.status}: ${body.slice(0, 300)}`);
       if (RETRYABLE_STATUSES.has(res.status)) err.retryableStatus = res.status;
       throw err;
     }
 
     const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+    // A free model can also come back with an explicit error object inside
+    // a 200 response (OpenRouter's documented behavior for some upstream
+    // provider failures) - treat that the same as a thrown HTTP error.
+    if (data?.error) {
+      throw new Error(`OpenRouter API error: ${JSON.stringify(data.error).slice(0, 300)}`);
+    }
+    const text = data?.choices?.[0]?.message?.content || '';
     if (!text.trim()) {
-      throw new Error('Gemini API returned an empty response');
+      // Include finish_reason (e.g. "length" means it ran out of the
+      // max_tokens budget, most likely to hidden reasoning tokens on a
+      // free "thinking" model) so an empty response is diagnosable instead
+      // of a bare "empty response" with no clue why.
+      const choice = data?.choices?.[0];
+      const detail = choice
+        ? `finish_reason=${choice.finish_reason || 'unknown'}, native_finish_reason=${choice.native_finish_reason || 'unknown'}`
+        : 'no choice object in response';
+      throw new Error(`OpenRouter API returned an empty response (${detail})`);
     }
     return text;
   } finally {
@@ -103,7 +149,8 @@ const DISCLAIMER = [
 /**
  * Drafts a certificate/MRL from a past template's text plus the new NIT's
  * text. Returns the disclaimer-prefixed draft text, or throws (callers must
- * catch and fall back to the manual review queue).
+ * catch and fall back to the manual review queue). Mirrors
+ * gemini-client.js#draftFromTemplate exactly.
  */
 async function draftFromTemplate({ category, requestType, templateText, nitText, notes, certMeta }) {
   const parts = [
@@ -125,10 +172,9 @@ async function draftFromTemplate({ category, requestType, templateText, nitText,
   return DISCLAIMER + draft;
 }
 
-// Canonical category names - must match certificates.category in the DB
-// exactly (see lib/template-matcher.js's CATEGORY_KEYWORDS, which was fixed
-// 2026-08-23 for this exact reason) so a requirement picked from this list
-// downstream matches a real past certificate.
+// Must match gemini-client.js's KNOWN_CATEGORIES exactly - both feed the
+// same certificates.category column and the same downstream template
+// matcher (lib/template-matcher.js).
 const KNOWN_CATEGORIES = [
   'Net Worth Certificate',
   'Turnover Certificate',
@@ -148,16 +194,11 @@ const KNOWN_CATEGORIES = [
 /**
  * Reads a tender/NIT document's text (expects "[PAGE n]" markers from
  * document-text.js#extractTextWithPages) and identifies every certificate
- * and/or MRL the tender requires the bidder's STATUTORY AUDITOR to issue,
- * each with a page reference and a supporting quote. Powers the "scan a
- * tender document" upload flow - the caller reviews/picks from this list
- * before anything is actually drafted, so a missed or over-eager match here
- * is corrected by a human, not acted on blindly.
- *
- * Returns a parsed array (never throws on malformed model output without
- * first trying a couple of recovery strategies - see parseRequirementsJson).
- * Throwing here should always mean "show the error, fall back to the manual
- * form" to the caller, same convention as draftFromTemplate.
+ * and/or MRL the tender requires the bidder's STATUTORY AUDITOR to issue.
+ * Mirrors gemini-client.js#analyzeTenderDocument exactly, including the
+ * Net Worth / financial-eligibility prompt guidance found necessary during
+ * real-world testing on the HCL tender (see gemini-client.js's comments
+ * for the full history of that fix).
  */
 async function analyzeTenderDocument({ text }) {
   const prompt = [
@@ -165,27 +206,10 @@ async function analyzeTenderDocument({ text }) {
     'The tender document text below includes "[PAGE n]" markers showing where each page starts - use the nearest preceding marker as the page reference for anything you cite.',
     "Identify every certificate and/or MRL (Manufacturer's Relationship Letter / manufacturer authorization letter) that this tender explicitly requires to be issued or signed by the bidder's STATUTORY AUDITOR / Chartered Accountant - not documents required from any other party (bank, government authority, manufacturer, etc.) unless it is specifically an MRL requirement.",
     `For each one found, use exactly one of these category names if it matches (do not invent variants or abbreviate): ${KNOWN_CATEGORIES.join(', ')}, or "MRL". If a requirement doesn't cleanly match any of these, use "Other Certificate" and explain what it actually is in the reasoning field.`,
-    // A real gap found on the HCL tender above: its Net Worth clause says
-    // "the Bidder shall have positive net worth as per their latest audited
-    // financial statement... Relevant documentary evidence... shall be
-    // furnished" - never using the word "certificate" - while neighboring
-    // clauses in the same eligibility section do say "certificate from
-    // Statutory Auditor". A strict "must say certificate" reading missed a
-    // requirement any CA would recognize as needing a Net Worth Certificate.
     `Eligibility criteria for financial standing (net worth, annual turnover, working capital, solvency) or corporate status (shareholding pattern, local content percentage, CDR/insolvency status) often state the requirement and ask for supporting audited-financial evidence WITHOUT the word "certificate" appearing in that specific sentence. Treat these the same as an explicit certificate requirement whenever the criterion matches one of these category names: Net Worth Certificate, Turnover Certificate, Working Capital Certificate, Solvency Certificate, Shareholding Certificate, Local Content Certificate, CDR Certificate, No CDR Certificate, CDR / IBC Certificate - in this firm's actual practice, that kind of financial/corporate eligibility criterion is always evidenced with a certificate from the statutory auditor, even when the tender just says "documentary evidence" or "audited financial statement". Do NOT extend this leniency to criteria outside those categories (technical experience, physical infrastructure, litigation history, EMD/bank guarantee, insurance, etc.) - for those, still require the clause to explicitly name a certificate/CA/statutory auditor before including it.`,
     `A tender's financial-eligibility section sometimes also requires a declaration that the bidder's financial statements/results are still under audit as of the tender opening or bid submission date (a fallback used when a CA certificate confirming the latest year's turnover/net worth isn't yet available) - use category "Audit Under Process Certificate" for this. Flag it even when the tender's own wording attributes the declaration to "the bidder", "CEO/CFO", or another company officer rather than explicitly to the CA/statutory auditor: in this firm's actual practice, this is always issued as a statutory-auditor certificate regardless of which party the tender names, the same way the categories in the previous paragraph are handled.`,
     'Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of objects with this exact shape:\n[{"category": "Net Worth Certificate", "page_reference": "Page 4", "quote": "the exact short clause from the document, max ~200 characters", "reasoning": "one sentence on why this certificate is required"}]',
     'If the document does not clearly require any statutory-auditor certificate or MRL, respond with an empty JSON array: []. Do not guess or include anything that is not clearly stated as required - a false positive is worse than a miss here, since a human reviews this list before anything is drafted.',
-    // Real NITs run to hundreds of pages, and the eligibility/qualification
-    // clause that actually names the required certificates is often deep in
-    // the document, not near the front (confirmed on a real 218-page/~527k-
-    // character HCL tender: "Chartered Accountant"/"Statutory Auditor" first
-    // appear around page 44, Shareholding around page 120, Working Capital
-    // around page 206). A short slice here silently hides exactly the
-    // clause this feature exists to find. gemini-flash-latest's context
-    // window is ~1M tokens (~4M characters), so 900k characters (~225k
-    // tokens) comfortably covers the largest real tenders seen so far while
-    // still bounding cost/latency against a pathological upload.
     `Tender document text:\n---\n${text.slice(0, 900000)}\n---`,
   ].join('\n\n');
 
@@ -193,21 +217,56 @@ async function analyzeTenderDocument({ text }) {
   return parseRequirementsJson(raw);
 }
 
+// Finds the first *complete* top-level JSON array in text by tracking
+// bracket depth (ignoring brackets that appear inside quoted strings)
+// rather than a greedy regex from the first "[" to the last "]" in the
+// whole response. Needed because this free model sometimes adds trailing
+// commentary after the array despite being told not to (seen during
+// real-world testing on 2026-09-02) - a greedy regex would swallow any
+// stray bracket in that trailing text and produce invalid JSON.
+function extractFirstJsonArray(text) {
+  const start = text.indexOf('[');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '[') depth += 1;
+    else if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseRequirementsJson(raw) {
-  // Gemini sometimes wraps JSON in ```json ... ``` fences despite being told
-  // not to - strip those before parsing rather than failing on them.
+  // Some free models wrap JSON in ```json ... ``` fences despite being told
+  // not to - strip those before parsing, same handling as gemini-client.js.
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
   let parsed;
   try {
     parsed = JSON.parse(cleaned);
   } catch (e) {
-    // Last resort: grab the first [...] block in the response, in case the
-    // model added a stray sentence before/after the JSON despite the prompt.
-    const match = cleaned.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error(`Gemini analysis response was not valid JSON: ${cleaned.slice(0, 200)}`);
-    parsed = JSON.parse(match[0]);
+    const extracted = extractFirstJsonArray(cleaned);
+    if (!extracted) {
+      throw new Error(`OpenRouter analysis response was not valid JSON: ${cleaned.slice(0, 300)}`);
+    }
+    try {
+      parsed = JSON.parse(extracted);
+    } catch (e2) {
+      throw new Error(`OpenRouter analysis response contained an array but it wasn't valid JSON (${e2.message}): ${extracted.slice(0, 300)}`);
+    }
   }
-  if (!Array.isArray(parsed)) throw new Error('Gemini analysis response was not a JSON array');
+  if (!Array.isArray(parsed)) throw new Error('OpenRouter analysis response was not a JSON array');
   return parsed
     .filter((item) => item && typeof item === 'object' && item.category)
     .map((item) => ({

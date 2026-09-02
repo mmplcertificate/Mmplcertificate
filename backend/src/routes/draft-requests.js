@@ -20,7 +20,7 @@ const storage = require('../storage');
 const { requireRole, requirePermission, logAudit } = require('../auth');
 const { matchFromText } = require('../lib/template-matcher');
 const { extractText, extractTextWithPages } = require('../lib/document-text');
-const { draftFromTemplate, analyzeTenderDocument } = require('../lib/gemini-client');
+const { draftFromTemplate, analyzeTenderDocument, isConfigured } = require('../lib/ai-provider');
 const { notifyNewDraftRequest } = require('../lib/notify');
 
 const router = express.Router();
@@ -46,9 +46,9 @@ function requireDraftingAccess(req, res, next) {
 // instead of re-uploading it once per selected certificate.
 router.post('/analyze', requireRole('client', 'admin', 'team'), requireDraftingAccess, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'file is required' });
-  if (!process.env.GEMINI_API_KEY) {
+  if (!isConfigured()) {
     return res.status(400).json({
-      error: 'Tender scanning needs GEMINI_API_KEY to be configured, which is not set up yet. Use the manual request form below instead.',
+      error: 'Tender scanning needs an AI provider configured (GEMINI_API_KEY or OPENROUTER_API_KEY, matching AI_PROVIDER), which is not set up yet. Use the manual request form below instead.',
     });
   }
 
@@ -154,7 +154,7 @@ router.post(
 
   logAudit(req.user, 'draft_request.create', info.lastInsertRowid);
 
-  if (process.env.GEMINI_API_KEY) {
+  if (isConfigured()) {
     await attemptAutoDraft({
       requestId: info.lastInsertRowid,
       requestType: request_type,
