@@ -1,5 +1,16 @@
 dbs:
   - path: data/mmpl.sqlite3
+    # Without this, `litestream replicate` never restores an existing
+    # replica on boot - it just creates a brand-new empty local db and
+    # starts a new numbered generation from scratch every time. Render's
+    # free tier has no persistent disk, so EVERY cold start (including a
+    # plain wake-from-inactivity, not just a deploy) hit this: real data
+    # sat untouched in R2 under its old generation while the app quietly
+    # ran on a fresh empty db. Found + root-caused 2026-09-03 after a
+    # cold start wiped the live dashboard's certificate list; confirmed
+    # via litestream's own docs (litestream.io/reference/config/) that
+    # this is off by default and has to be opted into explicitly.
+    restore-if-db-not-exists: true
     replicas:
       - type: s3
         endpoint: ${S3_ENDPOINT}
