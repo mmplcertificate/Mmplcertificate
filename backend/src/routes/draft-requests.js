@@ -163,6 +163,11 @@ router.post(
       nitBuffer: req.file ? req.file.buffer : null,
       nitMimeType: req.file ? req.file.mimetype : null,
       nitFilename: req.file ? req.file.originalname : null,
+      // Covers the "Prepare selected" tender-scan flow, which reuses an
+      // already-uploaded NIT via nit_file_id instead of re-uploading it -
+      // without this, nitBuffer is always null for that flow and auto-draft
+      // silently has no NIT text to work with, however good the scan was.
+      nitFileId,
       template,
       user: req.user,
     });
@@ -189,9 +194,21 @@ router.post(
 // the client right away. Any failure here is caught and recorded on the row
 // as auto_draft_error - the request always stays usable via the normal
 // manual /deliver flow even when this fails.
-async function attemptAutoDraft({ requestId, requestType, category, notes, nitBuffer, nitMimeType, nitFilename, template, user }) {
+async function attemptAutoDraft({ requestId, requestType, category, notes, nitBuffer, nitMimeType, nitFilename, nitFileId, template, user }) {
   try {
-    const nitText = nitBuffer ? await extractText(nitBuffer, nitMimeType, nitFilename) : null;
+    let nitText = null;
+    if (nitBuffer) {
+      nitText = await extractText(nitBuffer, nitMimeType, nitFilename);
+    } else if (nitFileId) {
+      // "Prepare selected" case: no fresh upload on this request, but a
+      // previously-uploaded NIT (from the /analyze scan step) was reused -
+      // fetch and read that instead of leaving nitText null.
+      const nitFileRow = db.prepare('SELECT * FROM file_library WHERE id = ?').get(nitFileId);
+      if (nitFileRow) {
+        const reusedNitBuffer = await storage.getObject(nitFileRow.storage_key);
+        nitText = await extractText(reusedNitBuffer, nitFileRow.mime_type, nitFileRow.original_name);
+      }
+    }
 
     let templateText = null;
     if (template) {
