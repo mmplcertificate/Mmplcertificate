@@ -76,6 +76,24 @@ function financialFiguresPromptBlock() {
       `- Net Worth: Rs. ${latest.netWorthConvention ?? latest.netWorthSimple} Lakhs`,
       `- Working Capital: Rs. ${latest.workingCapital ?? latest.workingCapitalApprox} Lakhs`
     );
+    // Breakdown components, added 2026-09-05 so a Net Worth/Working Capital
+    // Annexure table can show its actual line items instead of leaving them
+    // as [VERIFY] even though the total itself is a confirmed figure - see
+    // the real signed certificates checked that day (e.g. "1. Paid Up Share
+    // Capital 2. Add: Reserves... 3. Add: Securities Premium... = Net
+    // Worth"). Only added when present in the data file, so an older/thinner
+    // data entry (e.g. an early FY with only netWorthSimple) degrades
+    // gracefully to no breakdown line rather than printing "undefined".
+    if (latest.equityShareCapital != null && latest.retainedEarnings != null && latest.securitiesPremium != null) {
+      lines.push(
+        `- Net Worth breakdown (Singhi & Co.'s convention: Paid-up Equity Share Capital + Reserves/Retained Earnings + Securities Premium, Capital Reserve excluded): Equity Share Capital Rs. ${latest.equityShareCapital} Lakhs, Reserves/Retained Earnings Rs. ${latest.retainedEarnings} Lakhs, Securities Premium Rs. ${latest.securitiesPremium} Lakhs.`
+      );
+    }
+    if (latest.totalCurrentAssets != null && latest.totalCurrentLiabilities != null) {
+      lines.push(
+        `- Working Capital breakdown: Current Assets Rs. ${latest.totalCurrentAssets} Lakhs, Current Liabilities Rs. ${latest.totalCurrentLiabilities} Lakhs.`
+      );
+    }
   }
   if (series) {
     const seriesLine = Object.entries(series)
