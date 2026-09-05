@@ -90,6 +90,7 @@ async function generateOnce(prompt, apiKey) {
 }
 
 const { financialFiguresPromptBlock } = require('./financial-figures');
+const { resolvePartner, resolveLocation } = require('./signing-partners');
 
 const DISCLAIMER = [
   '=== AI-GENERATED DRAFT — NOT A SIGNED OR CERTIFIED DOCUMENT ===',
@@ -107,7 +108,13 @@ const DISCLAIMER = [
  * text. Returns the disclaimer-prefixed draft text, or throws (callers must
  * catch and fall back to the manual review queue).
  */
-async function draftFromTemplate({ category, requestType, templateText, nitText, notes, certMeta }) {
+async function draftFromTemplate({ category, requestType, templateText, nitText, notes, certMeta, signingPartner, certificateLocation }) {
+  // Resolved from a dropdown value in the request form (added 2026-09-05) -
+  // see lib/signing-partners.js. Never trusts free text for the partner's
+  // membership number/firm details; falls back to the one real partner
+  // and location on file if the value is missing or unrecognized.
+  const partner = resolvePartner(signingPartner);
+  const location = resolveLocation(certificateLocation);
   const parts = [
     `You are drafting a ${category || requestType.toUpperCase()} document for MMPL Private Limited, in the style and structure of Singhi & Co.'s past certificates.`,
     // Fixed fact regardless of template availability: Singhi & Co. is always
@@ -123,7 +130,7 @@ async function draftFromTemplate({ category, requestType, templateText, nitText,
     // instead of the client, the reverse of this firm's real convention.
     'Fixed fact: this certificate is always addressed "To, The Board of Directors, M/s MMPL Private Limited" (the firm\'s own client) - never addressed to the tender-issuing authority (e.g. a corporation\'s General Manager, Chairman, or Deputy General Manager), even if the tender document names a specific officer to submit paperwork to. MMPL, as the client, is the one who submits the certificate onward to the tender authority after receiving it - the certificate itself is never addressed to that authority.',
     'Fixed fact: M/s MMPL Private Limited (Formerly known as Maheshwari Mining Private Limited) has its Registered Office at Shilpangan, Block-LB, Plot-1, Sector-III, Module-1, 4th Floor, CF Building, Salt Lake, Kolkata \u2013 700106 - use this exact registered-office address wherever the certificate names the Company\'s address, regardless of where the tender, mine, or site itself is located.',
-    'Fixed fact: this certificate is always signed off "For Singhi & Co., Chartered Accountants, Firm Registration No. 302049E" by "Sankar Bandyopadhyay, Partner, Membership No.: 008230" - use this exact name, designation, and membership number every time, never a different partner and never an unnamed signatory. The signature block always ends "Place: Kolkata" (Singhi & Co.\'s own office location, not wherever the tender, mine, or client site is based) followed by a "Date:" line. Between "Firm Registration No. 302049E" and the partner\'s printed name, leave one blank line with nothing on it (no "[Signature]" placeholder, no other text) - that gap is where the physical signature and firm stamp go once printed, exactly like a certificate ready to be signed.',
+    `Fixed fact: this certificate is always signed off "For ${partner.firmName}, Chartered Accountants, Firm Registration No. ${partner.firmRegistrationNo}" by "${partner.label}, ${partner.designation}, Membership No.: ${partner.membershipNo}" - use this exact name, designation, and membership number every time, never a different partner and never an unnamed signatory. The signature block always ends "Place: ${location}" followed by a "Date:" line. Between the firm registration line and the partner's printed name, leave one blank line with nothing on it (no "[Signature]" placeholder, no other text) - that gap is where the physical signature and firm stamp go once printed, exactly like a certificate ready to be signed.`,
     'Fixed fact: every certificate includes at least one Annexure (starting "Annexure - A") immediately after the main signature block, ending with the same "For Singhi & Co." signature block repeated at the end of the Annexure. The Annexure contains the actual supporting computation for the certified figure - normally a numbered table (e.g. SL No. / Particulars / Value in Rs. Lakhs) showing how the figure was built up from the underlying financial figures, at the same level of detail as Singhi & Co.\'s real certificates for this category. Never state a certified figure in the main body without also breaking it down in an Annexure.',
     templateText
       ? `Reference template (past certificate to match wording/structure/format against):\n---\n${templateText.slice(0, 12000)}\n---`

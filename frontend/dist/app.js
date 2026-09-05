@@ -761,6 +761,7 @@
           <select id="adminReqType"><option value="certificate">Certificate</option><option value="mrl">MRL</option></select>
         </label><br/>
         <label>Category (optional)<input type="text" id="adminReqCategory" /></label><br/>
+        <label>Signing partner<select id="adminReqPartner"><option value="sankar-bandyopadhyay">Sankar Bandyopadhyay</option></select></label><br/><label>Certificate location<select id="adminReqLocation"><option value="Kolkata">Kolkata</option></select></label><br/>
         <label>Notice Inviting Tender (NIT) file<input type="file" id="adminReqFile" /></label><br/>
         <label>Notes<textarea id="adminReqNotes"></textarea></label><br/>
         <button class="btn primary" type="submit">Submit request</button>
@@ -772,6 +773,8 @@
       fd.append('request_type', submitPanel.querySelector('#adminReqType').value);
       fd.append('category', submitPanel.querySelector('#adminReqCategory').value);
       fd.append('notes', submitPanel.querySelector('#adminReqNotes').value);
+      fd.append('signing_partner', submitPanel.querySelector('#adminReqPartner').value);
+      fd.append('certificate_location', submitPanel.querySelector('#adminReqLocation').value);
       const file = submitPanel.querySelector('#adminReqFile').files[0];
       if (file) fd.append('nit', file);
       const res = await fetch('/api/draft-requests', { method: 'POST', credentials: 'include', body: fd });
@@ -800,6 +803,7 @@
         ${r.auto_draft_error ? `<p class="error">Auto-draft attempt failed, fell back to manual queue: ${r.auto_draft_error}</p>` : ''}
         <p>${r.notes || ''}</p>
         <p class="muted">Category: ${r.category || 'n/a'} | Matched template: ${r.matched_certificate_id ? '#' + r.matched_certificate_id : 'none found'}</p>
+        <p class="muted">Signing partner: ${r.signing_partner ? 'Sankar Bandyopadhyay' : 'n/a'} | Location: ${r.certificate_location || 'n/a'}</p>
         <div>
           ${r.nit_file_id ? `<span class="muted">NIT uploaded</span>` : ''}
           ${r.status === 'pending' ? `<button class="btn small" data-review="${r.id}">Mark in review</button>` : ''}
@@ -848,6 +852,7 @@
           <select id="reqType"><option value="certificate">Certificate</option><option value="mrl">MRL</option></select>
         </label><br/>
         <label>Category (optional)<input type="text" id="reqCategory" /></label><br/>
+        <label>Signing partner<select id="reqPartner"><option value="sankar-bandyopadhyay">Sankar Bandyopadhyay</option></select></label><br/><label>Certificate location<select id="reqLocation"><option value="Kolkata">Kolkata</option></select></label><br/>
         <label>Notice Inviting Tender (NIT) file<input type="file" id="reqFile" /></label><br/>
         <label>Notes<textarea id="reqNotes"></textarea></label><br/>
         <button class="btn primary" type="submit">Submit request</button>
@@ -858,6 +863,8 @@
       fd.append('request_type', formPanel.querySelector('#reqType').value);
       fd.append('category', formPanel.querySelector('#reqCategory').value);
       fd.append('notes', formPanel.querySelector('#reqNotes').value);
+      fd.append('signing_partner', formPanel.querySelector('#reqPartner').value);
+      fd.append('certificate_location', formPanel.querySelector('#reqLocation').value);
       const file = formPanel.querySelector('#reqFile').files[0];
       if (file) fd.append('nit', file);
       const res = await fetch('/api/draft-requests', { method: 'POST', credentials: 'include', body: fd });

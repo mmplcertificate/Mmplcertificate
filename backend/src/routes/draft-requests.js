@@ -105,7 +105,7 @@ router.post(
   requireDraftingAccess,
   upload.single('nit'),
   async (req, res) => {
-  const { request_type, category, notes } = req.body || {};
+  const { request_type, category, notes, signing_partner, certificate_location } = req.body || {};
   if (!request_type) return res.status(400).json({ error: 'request_type is required' });
 
   let nitFileId = null;
@@ -147,10 +147,10 @@ router.post(
 
   const info = db
     .prepare(
-      `INSERT INTO draft_requests (submitted_by_user_id, request_type, category, notes, nit_file_id, matched_certificate_id)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO draft_requests (submitted_by_user_id, request_type, category, notes, nit_file_id, matched_certificate_id, signing_partner, certificate_location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(req.user.id, request_type, category || null, notes || null, nitFileId, template ? template.id : null);
+    .run(req.user.id, request_type, category || null, notes || null, nitFileId, template ? template.id : null, signing_partner || null, certificate_location || null);
 
   logAudit(req.user, 'draft_request.create', info.lastInsertRowid);
 
@@ -170,6 +170,8 @@ router.post(
       nitFileId,
       template,
       user: req.user,
+      signingPartner: signing_partner,
+      certificateLocation: certificate_location,
     });
   }
 
@@ -194,7 +196,7 @@ router.post(
 // the client right away. Any failure here is caught and recorded on the row
 // as auto_draft_error - the request always stays usable via the normal
 // manual /deliver flow even when this fails.
-async function attemptAutoDraft({ requestId, requestType, category, notes, nitBuffer, nitMimeType, nitFilename, nitFileId, template, user }) {
+async function attemptAutoDraft({ requestId, requestType, category, notes, nitBuffer, nitMimeType, nitFilename, nitFileId, template, user, signingPartner, certificateLocation }) {
   try {
     let nitText = null;
     if (nitBuffer) {
@@ -240,6 +242,8 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
       nitText,
       notes,
       certMeta: template,
+      signingPartner,
+      certificateLocation,
     });
 
     const buffer = Buffer.from(draftText, 'utf8');
