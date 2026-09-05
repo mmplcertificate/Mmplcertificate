@@ -135,6 +135,8 @@ async function generateOnce(prompt, apiKey) {
   }
 }
 
+const { financialFiguresPromptBlock } = require('./financial-figures');
+
 const DISCLAIMER = [
   '=== AI-GENERATED DRAFT — NOT A SIGNED OR CERTIFIED DOCUMENT ===',
   'This draft was produced automatically from a past template and the',
@@ -155,15 +157,33 @@ const DISCLAIMER = [
 async function draftFromTemplate({ category, requestType, templateText, nitText, notes, certMeta }) {
   const parts = [
     `You are drafting a ${category || requestType.toUpperCase()} document for MMPL Private Limited, in the style and structure of Singhi & Co.'s past certificates.`,
+    // Fixed fact regardless of template availability: Singhi & Co. is always
+    // the certifying Chartered Accountant firm, MMPL Private Limited is
+    // always the client being certified for. Found 2026-09-05: without this,
+    // a template-less draft (no extractable text - e.g. a scanned template
+    // with no OCR available on Render) confused the two, signing off "For
+    // and on behalf of MMPL Private Limited" instead of "For Singhi & Co.,
+    // Chartered Accountants".
+    'Fixed facts, true regardless of what the template/tender documents say: the certifying Chartered Accountant firm is always "Singhi & Co., Chartered Accountants" (Firm Registration No. 302049E) - the certificate is always signed off in that firm\'s name (e.g. "For Singhi & Co., Chartered Accountants"), never "for and on behalf of MMPL Private Limited" or any other client-side signature block. MMPL Private Limited is the client being certified for, not the certifying party.',
+    // Fixed fact found 2026-09-05 by diffing AI drafts against a real signed
+    // certificate: every draft addressed the tender-issuing authority
+    // instead of the client, the reverse of this firm's real convention.
+    'Fixed fact: this certificate is always addressed "To, The Board of Directors, M/s MMPL Private Limited" (the firm\'s own client) - never addressed to the tender-issuing authority (e.g. a corporation\'s General Manager, Chairman, or Deputy General Manager), even if the tender document names a specific officer to submit paperwork to. MMPL, as the client, is the one who submits the certificate onward to the tender authority after receiving it - the certificate itself is never addressed to that authority.',
     templateText
       ? `Reference template (past certificate to match wording/structure/format against):\n---\n${templateText.slice(0, 12000)}\n---`
       : 'No past template text was available to extract automatically — draft using standard Singhi & Co. certificate conventions for this category, and mark this fact clearly.',
     nitText
       ? `New tender/engagement document (source for the specific figures, party names, and dates to use):\n---\n${nitText.slice(0, 12000)}\n---`
       : 'No tender document text could be extracted automatically — use the notes below and leave figure placeholders as [VERIFY].',
+    // Real Net Worth / Turnover / Working Capital figures from the client's
+    // own signed audited financials, added 2026-09-05 - see
+    // lib/financial-figures.js and lib/financial-figures.json.
+    // Returns null (and this line is dropped by the .filter(Boolean) below)
+    // if that data file is ever missing, so this can never block a draft.
+    financialFiguresPromptBlock(),
     notes ? `Additional notes from the client: ${notes}` : '',
     certMeta ? `Closest past reference certificate on file: #${certMeta.id} — ${certMeta.particulars || ''} (FY ${certMeta.fy || 'n/a'}, tender no. ${certMeta.tender_no || 'n/a'}).` : '',
-    'Instructions: match the past certificate\'s exact wording and structure as closely as possible. Substitute the new party names, dates, and figures from the tender document. Where a figure cannot be determined from the supplied documents, write "[VERIFY: <what is needed>]" rather than guessing. Do not fabricate UDIN, signing dates, or amounts. Output only the drafted document text, no commentary.',
+    'Instructions: match the past certificate\'s exact wording and structure as closely as possible. Substitute the new party names, dates, and figures from the tender document, using the confirmed financial figures above wherever they apply. Where a figure cannot be determined from the supplied documents or the confirmed figures, write "[VERIFY: <what is needed>]" rather than guessing. Do not fabricate UDIN, signing dates, or amounts. Output only the drafted document text, no commentary.',
   ]
     .filter(Boolean)
     .join('\n\n');
