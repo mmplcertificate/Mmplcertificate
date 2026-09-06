@@ -11,6 +11,21 @@ const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
 
+// Some files in file_library carry a wrong stored mime_type - notably a
+// batch of real past certificates migrated into this app whose rows were
+// all set to 'text/plain' even though the actual file is a PDF (confirmed
+// live: buffer starts with the literal "%PDF-1.4" header). Trusting that
+// stored mime_type there used to mean the raw PDF binary got decoded as
+// UTF-8 "text" and fed straight into AI drafting prompts as if it were the
+// certificate's real content - garbage in, garbage out, for every feature
+// that uses past certificates as reference material. Sniffing the actual
+// file header instead of trusting the stored label fixes this generically,
+// for these already-migrated rows and any future mislabeled upload alike,
+// without needing a data migration or per-row cleanup.
+function looksLikePdf(buffer) {
+  return Buffer.isBuffer(buffer) && buffer.length >= 5 && buffer.slice(0, 5).toString('latin1') === '%PDF-';
+}
+
 // OCR is a fallback path, not the default: a plain pdf-parse text layer is
 // tried first (fast, no dependency on external binaries) and OCR only runs
 // when that comes back empty - i.e. the PDF is a scan with no embedded text.
@@ -85,7 +100,7 @@ async function ocrPdfBuffer(buffer) {
 async function extractTextWithPages(buffer, mimeType, filename) {
   const ext = path.extname(filename || '').toLowerCase();
 
-  if (mimeType === 'application/pdf' || ext === '.pdf') {
+  if (mimeType === 'application/pdf' || ext === '.pdf' || looksLikePdf(buffer)) {
     // Same "a thrown parse still deserves an OCR attempt" fix as extractText()
     // above - see the comment there for why (real-world PDFs, not just
     // corrupt ones, can make pdf-parse throw outright).
@@ -166,11 +181,12 @@ async function extractText(buffer, mimeType, filename) {
   const ext = path.extname(filename || '').toLowerCase();
 
   try {
-    if (mimeType === 'text/plain' || ext === '.txt') {
-      return buffer.toString('utf8');
-    }
-
-    if (mimeType === 'application/pdf' || ext === '.pdf') {
+    // Check for PDF content (by real file header, not just the stored
+    // mime_type/extension) before the plain-text branch below - otherwise a
+    // PDF whose file_library row was mislabeled 'text/plain' (see
+    // looksLikePdf's comment above) would be decoded as raw-binary "text"
+    // instead of actually parsed.
+    if (mimeType === 'application/pdf' || ext === '.pdf' || looksLikePdf(buffer)) {
       // Lazy-required: keeps this an optional dependency for installs that
       // never touch the AI drafting path.
       // pdf-parse's bundled pdfjs can outright throw on some real-world PDFs
@@ -192,6 +208,10 @@ async function extractText(buffer, mimeType, filename) {
         console.error(`OCR fallback failed for ${filename}:`, e.message);
         return null;
       });
+    }
+
+    if (mimeType === 'text/plain' || ext === '.txt') {
+      return buffer.toString('utf8');
     }
 
     if (
