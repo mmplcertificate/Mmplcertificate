@@ -26,6 +26,28 @@ const { notifyNewDraftRequest } = require('../lib/notify');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+// Reference-certificate extraction can hit OCR (see document-text.js) for a
+// genuinely scanned past certificate, which is slow and, run back-to-back
+// across several documents inside one request/response cycle, risks the
+// kind of long-blocking behavior that can look like an unresponsive service
+// on a resource-constrained host. Two guards keep this bounded:
+//  - MAX_REFERENCE_CERTS caps how many past-certificate documents a single
+//    auto-draft attempt will ever try to extract text from.
+//  - withTimeout() caps how long any single document's extraction may run -
+//    a document that blows the budget (most likely a multi-page OCR job) is
+//    skipped (recorded in sourceCertSkipped) rather than left free to stall
+//    the whole request.
+const MAX_REFERENCE_CERTS = 5;
+const REFERENCE_EXTRACT_TIMEOUT_MS = 25000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ __timedOut: true }), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Shared by both POST '/' and POST '/analyze': clients always use these
 // routes to reach Akash; admin/team can also use them directly (e.g. to
 // scan/test a NIT without a separate client login). Team members need the
@@ -269,10 +291,12 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
 
       // Merge, de-duplicated by id, engagement-matched certs first (they
       // carry the richer same-tender context) followed by any same-category
-      // certs the engagement match didn't already include.
+      // certs the engagement match didn't already include. Capped at
+      // MAX_REFERENCE_CERTS - see the comment on that constant above.
       const seenIds = new Set();
       const sourceCerts = [];
       for (const c of [...engagementSourceCerts, ...categorySourceCerts]) {
+        if (sourceCerts.length >= MAX_REFERENCE_CERTS) break;
         if (seenIds.has(c.id)) continue;
         seenIds.add(c.id);
         sourceCerts.push(c);
@@ -302,9 +326,11 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         // eslint-disable-next-line no-await-in-loop
         const buf = await storage.getObject(doc.storage_key);
         // eslint-disable-next-line no-await-in-loop
-        const text = await extractText(buf, doc.mime_type, doc.original_name);
-        if (text) {
-          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text });
+        const extracted = await withTimeout(extractText(buf, doc.mime_type, doc.original_name), REFERENCE_EXTRACT_TIMEOUT_MS);
+        if (extracted && extracted.__timedOut) {
+          sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'extraction timed out (likely a slow OCR pass on a scanned document)' });
+        } else if (extracted) {
+          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text: extracted });
         } else {
           sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'no extractable text', mimeType: doc.mime_type });
         }
