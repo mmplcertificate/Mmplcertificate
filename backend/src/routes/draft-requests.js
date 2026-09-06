@@ -212,33 +212,47 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
       }
     }
 
-    let templateText = null;
-    if (template) {
-      const templateDoc = db
-        .prepare(
-          `SELECT cd.*, fl.storage_key, fl.mime_type, fl.original_name
-           FROM certificate_documents cd JOIN file_library fl ON fl.id = cd.file_id
-           WHERE cd.certificate_id = ?
-           ORDER BY (cd.doc_type = 'certificate') DESC, cd.id ASC
-           LIMIT 1`
-        )
-        .get(template.id);
-      if (templateDoc) {
-        const templateBuffer = await storage.getObject(templateDoc.storage_key);
-        templateText = await extractText(templateBuffer, templateDoc.mime_type, templateDoc.original_name);
+    // Fetch up to 3 recent past certificates in this exact category (not
+    // just the single closest template match) so the AI can learn this
+    // category's real recurring pattern - whether it has an Annexure at
+    // all, how many rows/years a computation table shows, its wording -
+    // by comparing several real examples, rather than that pattern being
+    // hardcoded here per category. See draftFromTemplate() in
+    // gemini-client.js/openrouter-client.js for how these are used.
+    let referenceTemplates = [];
+    if (category) {
+      const sameCategory = db
+        .prepare('SELECT * FROM certificates WHERE LOWER(category) = LOWER(?) ORDER BY updated_at DESC LIMIT 3')
+        .all(category);
+      for (const cert of sameCategory) {
+        const doc = db
+          .prepare(
+            `SELECT cd.*, fl.storage_key, fl.mime_type, fl.original_name
+             FROM certificate_documents cd JOIN file_library fl ON fl.id = cd.file_id
+             WHERE cd.certificate_id = ?
+             ORDER BY (cd.doc_type = 'certificate') DESC, cd.id ASC
+             LIMIT 1`
+          )
+          .get(cert.id);
+        if (!doc) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const buf = await storage.getObject(doc.storage_key);
+        // eslint-disable-next-line no-await-in-loop
+        const text = await extractText(buf, doc.mime_type, doc.original_name);
+        if (text) referenceTemplates.push({ id: cert.id, fy: cert.fy, text });
       }
     }
 
-    if (!nitText && !templateText) {
+    if (!nitText && referenceTemplates.length === 0) {
       throw new Error(
-        'Could not extract usable text from either the NIT upload or the matched template (unsupported format, scanned image, or no template on file) - nothing safe to draft from automatically.'
+        'Could not extract usable text from either the NIT upload or any past certificate on file for this category (unsupported format, scanned image, or no certificate on file) - nothing safe to draft from automatically.'
       );
     }
 
     const draftText = await draftFromTemplate({
       category,
       requestType,
-      templateText,
+      referenceTemplates,
       nitText,
       notes,
       certMeta: template,
