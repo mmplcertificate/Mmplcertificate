@@ -18,7 +18,7 @@ const multer = require('multer');
 const db = require('../db');
 const storage = require('../storage');
 const { requireRole, requirePermission, logAudit } = require('../auth');
-const { matchFromText } = require('../lib/template-matcher');
+const { matchFromText, findRecentRealCertificates } = require('../lib/template-matcher');
 const { extractText, extractTextWithPages } = require('../lib/document-text');
 const { draftFromTemplate, analyzeTenderDocument, isConfigured } = require('../lib/ai-provider');
 const { notifyNewDraftRequest } = require('../lib/notify');
@@ -221,9 +221,12 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
     // gemini-client.js/openrouter-client.js for how these are used.
     let referenceTemplates = [];
     if (category) {
-      const sameCategory = db
-        .prepare('SELECT * FROM certificates WHERE LOWER(category) = LOWER(?) ORDER BY updated_at DESC LIMIT 3')
-        .all(category);
+      const allCertificates = db.prepare('SELECT * FROM certificates').all();
+      // Excludes the 4 blank/master template rows generically (see
+      // template-matcher.js#isRealCertificate) - those are placeholder
+      // forms, not real issued certificates, and would otherwise dilute or
+      // mislead the pattern the AI is meant to learn from real examples.
+      const sameCategory = findRecentRealCertificates(allCertificates, category, 3);
       for (const cert of sameCategory) {
         const doc = db
           .prepare(
