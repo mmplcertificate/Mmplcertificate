@@ -197,6 +197,7 @@ router.post(
 // as auto_draft_error - the request always stays usable via the normal
 // manual /deliver flow even when this fails.
 async function attemptAutoDraft({ requestId, requestType, category, notes, nitBuffer, nitMimeType, nitFilename, nitFileId, template, user, signingPartner, certificateLocation }) {
+  let debugInfo = null; // populated below once available; persisted on both the success and failure paths
   try {
     let nitText = null;
     if (nitBuffer) {
@@ -258,6 +259,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         if (sourceCerts.length > 0) referenceSource = { via: 'category' };
       }
 
+      const sourceCertSkipped = [];
       for (const cert of sourceCerts) {
         const doc = db
           .prepare(
@@ -268,13 +270,31 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
              LIMIT 1`
           )
           .get(cert.id);
-        if (!doc) continue;
+        if (!doc) {
+          sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'no certificate_documents row' });
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
         const buf = await storage.getObject(doc.storage_key);
         // eslint-disable-next-line no-await-in-loop
         const text = await extractText(buf, doc.mime_type, doc.original_name);
-        if (text) referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text });
+        if (text) {
+          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text });
+        } else {
+          sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'no extractable text', mimeType: doc.mime_type });
+        }
       }
+
+      // Best-effort diagnostic snapshot - never blocks drafting, just recorded
+      // on the row so a request's outcome (e.g. a missing Annexure) can be
+      // traced back to which reference certificates it actually got and why,
+      // without digging through server logs.
+      debugInfo = {
+        nitTextLen: nitText ? nitText.length : 0,
+        referenceSource,
+        referenceTemplates: referenceTemplates.map((t) => ({ id: t.id, category: t.category, fy: t.fy, textLen: t.text.length })),
+        sourceCertSkipped,
+      };
     }
 
     if (referenceSource) {
@@ -321,16 +341,16 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
     db.prepare(
       `UPDATE draft_requests
        SET result_file_id = ?, status = 'delivered', auto_drafted = 1, auto_draft_error = NULL,
-           delivered_at = datetime('now'), updated_at = datetime('now')
+           debug_info = ?, delivered_at = datetime('now'), updated_at = datetime('now')
        WHERE id = ?`
-    ).run(fileRow.id, requestId);
+    ).run(fileRow.id, debugInfo ? JSON.stringify(debugInfo) : null, requestId);
 
     logAudit(user, 'draft_request.auto_drafted', requestId);
   } catch (e) {
     console.error(`Auto-draft failed for request ${requestId}:`, e.message);
     db.prepare(
-      "UPDATE draft_requests SET auto_draft_error = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(e.message.slice(0, 500), requestId);
+      "UPDATE draft_requests SET auto_draft_error = ?, debug_info = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(e.message.slice(0, 500), debugInfo ? JSON.stringify(debugInfo) : null, requestId);
     logAudit(user, 'draft_request.auto_draft_failed', `${requestId}: ${e.message}`);
   }
 }
