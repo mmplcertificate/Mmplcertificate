@@ -285,6 +285,22 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         }
       }
 
+      // Extra diagnostic detail on the reference documents themselves - is
+      // the stored document actually the certificate letter, or something
+      // much larger (a bundled financial-statements attachment) where the
+      // sliced prompt excerpt (draftFromTemplate slices each to 4000 chars)
+      // might land before the certificate's own Annexure ever appears.
+      const referenceDocDebug = referenceTemplates.map((t) => {
+        const annexureIdx = t.text.indexOf('Annexure');
+        return {
+          id: t.id,
+          textLen: t.text.length,
+          head300: t.text.slice(0, 300),
+          around4000: t.text.slice(3800, 4400),
+          annexureFirstIdx: annexureIdx,
+        };
+      });
+
       // Best-effort diagnostic snapshot - never blocks drafting, just recorded
       // on the row so a request's outcome (e.g. a missing Annexure) can be
       // traced back to which reference certificates it actually got and why,
@@ -294,6 +310,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         referenceSource,
         referenceTemplates: referenceTemplates.map((t) => ({ id: t.id, category: t.category, fy: t.fy, textLen: t.text.length })),
         sourceCertSkipped,
+        referenceDocDebug,
       };
     }
 
