@@ -26,6 +26,7 @@ module.exports = {
   isConfigured,
   draftFromTemplate: impl.draftFromTemplate,
   analyzeTenderDocument: impl.analyzeTenderDocument,
+  matchSimilarEngagement: impl.matchSimilarEngagement,
   KNOWN_CATEGORIES: impl.KNOWN_CATEGORIES,
   DISCLAIMER: impl.DISCLAIMER,
 };

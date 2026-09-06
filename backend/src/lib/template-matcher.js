@@ -102,4 +102,60 @@ function matchFromText(text, candidates) {
   return { category, template };
 }
 
-module.exports = { CATEGORY_KEYWORDS, detectCategory, findBestTemplate, findRecentRealCertificates, isRealCertificate, matchFromText };
+// --- Engagement-level matching (added 2026-09-06) -------------------------
+// A single real tender usually needs SEVERAL certificate categories at once
+// (e.g. one tender_no on file has Net Worth + Turnover + Audit Under Process
+// all issued together) - real certificates on file that share a tender_no
+// are one coherent, real-world example of how this firm handled a similar
+// engagement, richer than picking same-category certificates from unrelated
+// tenders. Grouping is done here from the real tender_no data already on
+// file; deciding WHICH past tender is actually similar to a new one is left
+// to the AI (see matchSimilarEngagement in gemini-client.js/
+// openrouter-client.js) rather than any keyword rule here.
+
+/**
+ * Groups real (non-blank-template) certificates that have a tender_no on
+ * file into one entry per distinct tender_no, each listing which categories
+ * were issued for it and a short description - the candidate list an AI
+ * call can pick the closest match from.
+ */
+function buildPastEngagements(candidates) {
+  const byTender = new Map();
+  for (const c of candidates) {
+    if (!isRealCertificate(c)) continue;
+    const tenderNo = (c.tender_no || '').trim();
+    if (!tenderNo) continue;
+    if (!byTender.has(tenderNo)) byTender.set(tenderNo, []);
+    byTender.get(tenderNo).push(c);
+  }
+  return Array.from(byTender.entries()).map(([tenderNo, certs]) => ({
+    tenderNo,
+    categories: Array.from(new Set(certs.map((c) => c.category).filter(Boolean))),
+    particulars: certs.map((c) => c.particulars).find(Boolean) || null,
+  }));
+}
+
+/**
+ * All real certificates on file (any category) that share the given
+ * tender_no, most-recently-updated first, capped to `limit` - the full set
+ * of certificates issued for one matched past engagement.
+ */
+function findCertificatesByTenderNo(candidates, tenderNo, limit) {
+  if (!tenderNo) return [];
+  const matches = candidates.filter(
+    (c) => isRealCertificate(c) && (c.tender_no || '').trim() === tenderNo
+  );
+  matches.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  return matches.slice(0, limit);
+}
+
+module.exports = {
+  CATEGORY_KEYWORDS,
+  detectCategory,
+  findBestTemplate,
+  findRecentRealCertificates,
+  isRealCertificate,
+  matchFromText,
+  buildPastEngagements,
+  findCertificatesByTenderNo,
+};

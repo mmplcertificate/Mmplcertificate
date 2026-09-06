@@ -124,9 +124,9 @@ async function draftFromTemplate({ category, requestType, referenceTemplates, ni
   // as a per-category rule.
   const referenceBlock = referenceTemplates && referenceTemplates.length
     ? [
-        `Reference certificates (${referenceTemplates.length} real, past certificate(s) Singhi & Co. has issued for this exact category "${category}" - study them together to identify the pattern this category actually follows before drafting):`,
+        `Reference certificates (${referenceTemplates.length} real, past certificate(s) Singhi & Co. has issued - some may be for a different certificate category than the one you are drafting now, when they come from the same or a similar past tender engagement as this one; study them together to identify the pattern each category actually follows before drafting, and rely only on the one(s) whose category matches "${category}" for that category's own subject matter and Annexure format):`,
         ...referenceTemplates.map(
-          (t, i) => `--- Reference certificate ${i + 1} of ${referenceTemplates.length} (past certificate #${t.id}, FY ${t.fy || 'n/a'}) ---\n${t.text.slice(0, 4000)}`
+          (t, i) => `--- Reference certificate ${i + 1} of ${referenceTemplates.length} (past certificate #${t.id}, category: ${t.category || category}, FY ${t.fy || 'n/a'}) ---\n${t.text.slice(0, 4000)}`
         ),
       ].join('\n\n')
     : null;
@@ -146,8 +146,8 @@ async function draftFromTemplate({ category, requestType, referenceTemplates, ni
     'Fixed fact: this certificate is always addressed "To, The Board of Directors, M/s MMPL Private Limited" (the firm\'s own client) - never addressed to the tender-issuing authority (e.g. a corporation\'s General Manager, Chairman, or Deputy General Manager), even if the tender document names a specific officer to submit paperwork to. MMPL, as the client, is the one who submits the certificate onward to the tender authority after receiving it - the certificate itself is never addressed to that authority.',
     'Fixed fact: M/s MMPL Private Limited (Formerly known as Maheshwari Mining Private Limited) has its Registered Office at Shilpangan, Block-LB, Plot-1, Sector-III, Module-1, 4th Floor, CF Building, Salt Lake, Kolkata \u2013 700106 - use this exact registered-office address wherever the certificate names the Company\'s address, regardless of where the tender, mine, or site itself is located.',
     `Fixed fact: this certificate is always signed off "For ${partner.firmName}, Chartered Accountants, Firm Registration No. ${partner.firmRegistrationNo}" by "${partner.label}, ${partner.designation}, Membership No.: ${partner.membershipNo}" - use this exact name, designation, and membership number every time, never a different partner and never an unnamed signatory. The signature block always ends "Place: ${location}" followed by a "Date:" line. Between the firm registration line and the partner's printed name, leave one blank line with nothing on it (no "[Signature]" placeholder, no other text) - that gap is where the physical signature and firm stamp go once printed, exactly like a certificate ready to be signed.`,
-    'Fixed fact: whether this certificate includes an Annexure at all, and exactly what that Annexure computes (which columns, how many rows/years/components, whether a total or average row appears), is determined entirely by the reference certificates below for this same category - not by any category name or rule stated here. Compare the reference certificates to each other: if they consistently include a computation table, build one the same way, matching their exact structure (same columns, same number of rows/years/components, starting "Annexure - A" and ending with the same "For Singhi & Co." signature block repeated); if they consistently have no Annexure (e.g. they are a pure confirmation or negative-assurance statement), include none. Never invent an Annexure structure, or add/omit one, that the reference certificates for this category don\'t themselves show.',
-    `Fixed fact: this certificate's actual subject matter is exactly what the reference certificates below certify for this same category ("${category}") - certify only that subject, in their own terms and wording. Do not substitute a different, unrelated certification (for example, financial figures such as Net Worth, Turnover, or Working Capital) just because other data happens to be available in this prompt, unless the reference certificates for this category themselves include that data alongside their actual subject.`,
+    'Fixed fact: whether this certificate includes an Annexure at all, and exactly what that Annexure computes (which columns, how many rows/years/components, whether a total or average row appears), is determined entirely by the reference certificate(s) below whose own category matches the one you are drafting now - not by any category name or rule stated here, and not by a reference certificate for a different category. Compare those same-category reference certificates to each other: if they consistently include a computation table, build one the same way, matching their exact structure (same columns, same number of rows/years/components, starting "Annexure - A" and ending with the same "For Singhi & Co." signature block repeated); if they consistently have no Annexure (e.g. they are a pure confirmation or negative-assurance statement), include none. Never invent an Annexure structure, or add/omit one, that the same-category reference certificates don\'t themselves show.',
+    `Fixed fact: this certificate's actual subject matter is exactly what the reference certificate(s) below whose own category matches "${category}" certify - certify only that subject, in their own terms and wording. A reference certificate below for a different category (included only because it came from the same or a similar past tender engagement) shows you tone/context, never the subject matter to certify. Do not substitute a different, unrelated certification (for example, financial figures such as Net Worth, Turnover, or Working Capital) just because other data or other categories' reference certificates happen to be available in this prompt, unless the same-category reference certificates themselves include that data alongside their actual subject.`,
     'Fixed fact: the main body is always written as numbered paragraphs (1., 2., 3., ...) under these exact section headings, in this order, every time, even when a tender document is not available to fill in every detail: an opening unnumbered paragraph identifying the Company and its registered office, then a numbered paragraph 1 stating who engaged Singhi & Co. and for what purpose; a "Management\'s Responsibility" heading with its paragraph(s); an "Auditors\' Responsibility" heading with its paragraph(s) (including a paragraph on compliance with the ICAI Guidance Note on Reports or Certificates for Special Purposes and Standard on Quality Control (SQC) 1); a "Conclusion" heading with the certified figure; and a "Restriction on Use" heading limiting the certificate to the stated purpose. This is not optional shorthand for when tender specifics are missing - write the full structure regardless, using "[VERIFY: <what is needed>]" in place of any missing tender number, clause reference, or engagement letter date rather than shortening or skipping a section.',
     referenceBlock
       || 'No past certificate text was available to extract automatically for this category — draft using standard Singhi & Co. certificate conventions, and mark this fact clearly.',
@@ -267,4 +267,49 @@ function parseRequirementsJson(raw) {
     }));
 }
 
-module.exports = { generate, draftFromTemplate, analyzeTenderDocument, KNOWN_CATEGORIES, DISCLAIMER, MODEL };
+/**
+ * Asks the AI which past tender engagement (by tender_no) is most similar
+ * in nature to a new tender's text, so that ALL the real certificates
+ * issued for that one past tender - not just same-category ones from
+ * unrelated engagements - can be used together as a coherent drafting
+ * example. Returns null (never throws) if there's no NIT text, no past
+ * engagements to compare against, or the response can't be parsed/doesn't
+ * match a real tender_no - callers fall back to category-only matching in
+ * every one of those cases, exactly like a missing template already does.
+ */
+async function matchSimilarEngagement({ nitText, pastEngagements }) {
+  if (!nitText || !pastEngagements || pastEngagements.length === 0) return null;
+
+  const listText = pastEngagements
+    .slice(0, 60)
+    .map((e, i) => `${i + 1}. Tender No.: ${e.tenderNo} | Certificates already issued for it: ${e.categories.join(', ') || 'n/a'} | ${e.particulars ? e.particulars.slice(0, 200) : ''}`)
+    .join('\n');
+
+  const prompt = [
+    'You are helping a Chartered Accountant firm (Singhi & Co.) find which past tender engagement is most similar in nature to a brand new tender, so the certificates already issued for that similar past tender can be reused as real drafting examples for the new one.',
+    `New tender document text:\n---\n${nitText.slice(0, 20000)}\n---`,
+    `Past tender engagements this firm has already handled (numbered list - tender number | certificate categories already issued for it | a short description of that tender):\n${listText}`,
+    'Identify which ONE past tender engagement (if any) is most similar to the new one - for example the same issuing authority/PSU, the same industry or type of site (mining, drilling, exploration, etc.), or the same kind of eligibility criteria - such that its past certificates would be a genuinely good structural and stylistic match for drafting certificates for the new tender. Only pick one if it is a reasonably close match - a wrong or forced match is worse than no match, since the caller falls back to a safe default when you say none are close.',
+    'Respond with ONLY a JSON object (no markdown code fences, no commentary before or after): {"tender_no": "<the exact Tender No. value from the numbered list above that is the best match, or null if none are reasonably close>", "reasoning": "one short sentence"}',
+  ].join('\n\n');
+
+  let raw;
+  try {
+    raw = await generate(prompt);
+  } catch (e) {
+    return null;
+  }
+
+  try {
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : cleaned);
+    if (!parsed || !parsed.tender_no || parsed.tender_no === 'null') return null;
+    const found = pastEngagements.find((e) => e.tenderNo === parsed.tender_no);
+    return found ? { tenderNo: found.tenderNo, reasoning: parsed.reasoning ? String(parsed.reasoning).trim() : null } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { generate, draftFromTemplate, analyzeTenderDocument, matchSimilarEngagement, KNOWN_CATEGORIES, DISCLAIMER, MODEL };

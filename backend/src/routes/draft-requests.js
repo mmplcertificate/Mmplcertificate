@@ -18,9 +18,9 @@ const multer = require('multer');
 const db = require('../db');
 const storage = require('../storage');
 const { requireRole, requirePermission, logAudit } = require('../auth');
-const { matchFromText, findRecentRealCertificates } = require('../lib/template-matcher');
+const { matchFromText, findRecentRealCertificates, buildPastEngagements, findCertificatesByTenderNo } = require('../lib/template-matcher');
 const { extractText, extractTextWithPages } = require('../lib/document-text');
-const { draftFromTemplate, analyzeTenderDocument, isConfigured } = require('../lib/ai-provider');
+const { draftFromTemplate, analyzeTenderDocument, matchSimilarEngagement, isConfigured } = require('../lib/ai-provider');
 const { notifyNewDraftRequest } = require('../lib/notify');
 
 const router = express.Router();
@@ -212,22 +212,53 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
       }
     }
 
-    // Fetch up to 3 recent past certificates in this exact category (not
-    // just the single closest template match) so the AI can learn this
-    // category's real recurring pattern - whether it has an Annexure at
-    // all, how many rows/years a computation table shows, its wording -
-    // by comparing several real examples, rather than that pattern being
-    // hardcoded here per category. See draftFromTemplate() in
-    // gemini-client.js/openrouter-client.js for how these are used.
+    // Build the set of real past certificates the AI compares against to
+    // learn this category's actual pattern (Annexure or not, wording,
+    // structure) - never a single template, never a hardcoded per-category
+    // rule. Two ways to build this set, tried in order:
+    //  1. Engagement match (needs NIT text): ask the AI which past tender
+    //     engagement on file is most similar to this new tender, then use
+    //     ALL the real certificates issued for that one matched tender_no
+    //     (any category) - a single past engagement often needed several
+    //     certificate types together, so this gives a coherent, tender-
+    //     consistent set of examples instead of same-category certificates
+    //     pulled from unrelated engagements.
+    //  2. Category fallback (always available): the 3 most recent real
+    //     certificates in this exact category, regardless of tender - used
+    //     whenever there's no NIT text, no past engagement is a close
+    //     enough match, or the AI call fails for any reason.
     let referenceTemplates = [];
-    if (category) {
+    let referenceSource = null;
+    if (category || nitText) {
       const allCertificates = db.prepare('SELECT * FROM certificates').all();
-      // Excludes the 4 blank/master template rows generically (see
-      // template-matcher.js#isRealCertificate) - those are placeholder
-      // forms, not real issued certificates, and would otherwise dilute or
-      // mislead the pattern the AI is meant to learn from real examples.
-      const sameCategory = findRecentRealCertificates(allCertificates, category, 3);
-      for (const cert of sameCategory) {
+      let sourceCerts = [];
+
+      if (nitText) {
+        const pastEngagements = buildPastEngagements(allCertificates);
+        let engagementMatch = null;
+        try {
+          engagementMatch = await matchSimilarEngagement({ nitText, pastEngagements });
+        } catch (e) {
+          engagementMatch = null; // never blocks drafting - falls back below
+        }
+        if (engagementMatch) {
+          sourceCerts = findCertificatesByTenderNo(allCertificates, engagementMatch.tenderNo, 6);
+          if (sourceCerts.length > 0) {
+            referenceSource = { via: 'engagement', tenderNo: engagementMatch.tenderNo, reasoning: engagementMatch.reasoning };
+          }
+        }
+      }
+
+      if (sourceCerts.length === 0 && category) {
+        // Excludes the 4 blank/master template rows generically (see
+        // template-matcher.js#isRealCertificate) - those are placeholder
+        // forms, not real issued certificates, and would otherwise dilute
+        // or mislead the pattern the AI is meant to learn from real ones.
+        sourceCerts = findRecentRealCertificates(allCertificates, category, 3);
+        if (sourceCerts.length > 0) referenceSource = { via: 'category' };
+      }
+
+      for (const cert of sourceCerts) {
         const doc = db
           .prepare(
             `SELECT cd.*, fl.storage_key, fl.mime_type, fl.original_name
@@ -242,8 +273,18 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         const buf = await storage.getObject(doc.storage_key);
         // eslint-disable-next-line no-await-in-loop
         const text = await extractText(buf, doc.mime_type, doc.original_name);
-        if (text) referenceTemplates.push({ id: cert.id, fy: cert.fy, text });
+        if (text) referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text });
       }
+    }
+
+    if (referenceSource) {
+      console.log(
+        `Draft request #${requestId}: reference certificates sourced via ${referenceSource.via}` +
+          (referenceSource.via === 'engagement'
+            ? ` (matched tender_no "${referenceSource.tenderNo}"${referenceSource.reasoning ? ` - ${referenceSource.reasoning}` : ''})`
+            : '') +
+          `, ${referenceTemplates.length} certificate(s).`
+      );
     }
 
     if (!nitText && referenceTemplates.length === 0) {
