@@ -96,9 +96,14 @@ async function generateOnce(prompt, apiKey) {
         // chain-of-thought before writing the actual answer, and a small
         // cap can burn out entirely on reasoning for a large document -
         // seen as a fully empty response on a ~459k-character tender during
-        // real-world testing on 2026-09-02 (max_tokens was 4096 then).
-        // Raised well above what the JSON answer itself could ever need.
-        max_tokens: 16000,
+        // real-world testing on 2026-09-02 (max_tokens was 4096 then), and
+        // again on 2026-09-06 for an ordinary drafting call once real
+        // reference-certificate text was added to the prompt (16000 wasn't
+        // enough there either). Raised again, and the empty-response case
+        // below is now retried rather than treated as final, since how much
+        // of this budget goes to hidden reasoning vs. the real answer isn't
+        // fully predictable call to call.
+        max_tokens: 32000,
       }),
       signal: controller.signal,
     });
@@ -124,10 +129,20 @@ async function generateOnce(prompt, apiKey) {
       // free "thinking" model) so an empty response is diagnosable instead
       // of a bare "empty response" with no clue why.
       const choice = data?.choices?.[0];
+      const finishReason = choice?.finish_reason || 'unknown';
       const detail = choice
-        ? `finish_reason=${choice.finish_reason || 'unknown'}, native_finish_reason=${choice.native_finish_reason || 'unknown'}`
+        ? `finish_reason=${finishReason}, native_finish_reason=${choice.native_finish_reason || 'unknown'}`
         : 'no choice object in response';
-      throw new Error(`OpenRouter API returned an empty response (${detail})`);
+      const err = new Error(`OpenRouter API returned an empty response (${detail})`);
+      // A "length" finish reason means the model burned its whole budget on
+      // hidden reasoning before writing anything - seen twice live on
+      // 2026-09-06 for the exact same drafting prompt, so it isn't a one-off
+      // fluke worth giving up on immediately. How much a free "thinking"
+      // model reasons before answering isn't fully deterministic call to
+      // call, so retrying (same budget as any other retryable failure) has
+      // a real chance of getting a normal answer instead.
+      if (finishReason === 'length') err.retryableStatus = 'length';
+      throw err;
     }
     return text;
   } finally {
