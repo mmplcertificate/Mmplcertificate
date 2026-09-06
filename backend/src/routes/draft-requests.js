@@ -40,6 +40,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 const MAX_REFERENCE_CERTS = 5;
 const REFERENCE_EXTRACT_TIMEOUT_MS = 25000;
 
+// Absolute ceiling on one auto-draft attempt (extraction + both AI calls
+// combined) - see the comment where this is used in POST '/' below.
+const OVERALL_AUTO_DRAFT_TIMEOUT_MS = 240000;
+
 function withTimeout(promise, ms) {
   let timer;
   const timeout = new Promise((resolve) => {
@@ -177,7 +181,17 @@ router.post(
   logAudit(req.user, 'draft_request.create', info.lastInsertRowid);
 
   if (isConfigured()) {
-    await attemptAutoDraft({
+    // Hard outer bound on the whole auto-draft attempt. attemptAutoDraft()
+    // already catches everything IT can throw and always records success/
+    // failure on the row - but that only helps if something inside it
+    // actually rejects. A child process that outlives its own internal
+    // timeout (seen live: an OCR pass that should be capped well under a
+    // minute leaving a request stuck in "pending" for 10+ minutes with no
+    // error, no crash, nothing) can leave the awaited promise simply never
+    // settling. Racing it against a generous absolute timeout guarantees
+    // this route always responds and the row always leaves "pending" one
+    // way or another, regardless of what hangs inside.
+    const attemptPromise = attemptAutoDraft({
       requestId: info.lastInsertRowid,
       requestType: request_type,
       category: category || detectedCategory,
@@ -195,6 +209,23 @@ router.post(
       signingPartner: signing_partner,
       certificateLocation: certificate_location,
     });
+    const timedOut = await Promise.race([
+      attemptPromise.then(() => false).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(true), OVERALL_AUTO_DRAFT_TIMEOUT_MS)),
+    ]);
+    if (timedOut) {
+      console.error(
+        `Auto-draft for request ${info.lastInsertRowid} exceeded ${OVERALL_AUTO_DRAFT_TIMEOUT_MS}ms - marking it timed out rather than leaving it stuck in "pending" indefinitely. (attemptAutoDraft's own promise is left running in the background - if it eventually settles, the "AND status = 'pending'" guard below stops it from overwriting whatever this timeout just recorded.)`
+      );
+      db.prepare(
+        `UPDATE draft_requests
+         SET auto_draft_error = ?, updated_at = datetime('now')
+         WHERE id = ? AND status = 'pending'`
+      ).run(
+        `Auto-draft timed out after ${Math.round(OVERALL_AUTO_DRAFT_TIMEOUT_MS / 1000)}s (likely a hung OCR or AI-provider call) - falling back to manual drafting.`,
+        info.lastInsertRowid
+      );
+    }
   }
 
   const finalRow = db.prepare('SELECT * FROM draft_requests WHERE id = ?').get(info.lastInsertRowid);
