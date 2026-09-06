@@ -216,7 +216,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
     // Build the set of real past certificates the AI compares against to
     // learn this category's actual pattern (Annexure or not, wording,
     // structure) - never a single template, never a hardcoded per-category
-    // rule. Two ways to build this set, tried in order:
+    // rule. Two sources, always merged rather than one replacing the other:
     //  1. Engagement match (needs NIT text): ask the AI which past tender
     //     engagement on file is most similar to this new tender, then use
     //     ALL the real certificates issued for that one matched tender_no
@@ -224,39 +224,64 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
     //     certificate types together, so this gives a coherent, tender-
     //     consistent set of examples instead of same-category certificates
     //     pulled from unrelated engagements.
-    //  2. Category fallback (always available): the 3 most recent real
-    //     certificates in this exact category, regardless of tender - used
-    //     whenever there's no NIT text, no past engagement is a close
-    //     enough match, or the AI call fails for any reason.
+    //  2. Same-category fallback (always computed): the 3 most recent real
+    //     certificates in this exact category, regardless of tender. This
+    //     used to run ONLY when there was no engagement match - but a
+    //     matched engagement can easily have no certificate at all in the
+    //     category being drafted right now (or one with no extractable
+    //     document), which left the AI with zero examples of that
+    //     category's own pattern. It is now always included alongside
+    //     whatever the engagement match contributes, de-duplicated by id.
     let referenceTemplates = [];
     let referenceSource = null;
     if (category || nitText) {
       const allCertificates = db.prepare('SELECT * FROM certificates').all();
-      let sourceCerts = [];
 
+      // Path 1: engagement match (needs NIT text) - every real certificate
+      // issued for the one past tender the AI judges most similar, any
+      // category, up to 6.
+      let engagementSourceCerts = [];
+      let engagementMatch = null;
       if (nitText) {
         const pastEngagements = buildPastEngagements(allCertificates);
-        let engagementMatch = null;
         try {
           engagementMatch = await matchSimilarEngagement({ nitText, pastEngagements });
         } catch (e) {
           engagementMatch = null; // never blocks drafting - falls back below
         }
         if (engagementMatch) {
-          sourceCerts = findCertificatesByTenderNo(allCertificates, engagementMatch.tenderNo, 6);
-          if (sourceCerts.length > 0) {
-            referenceSource = { via: 'engagement', tenderNo: engagementMatch.tenderNo, reasoning: engagementMatch.reasoning };
-          }
+          engagementSourceCerts = findCertificatesByTenderNo(allCertificates, engagementMatch.tenderNo, 6);
         }
       }
 
-      if (sourceCerts.length === 0 && category) {
-        // Excludes the 4 blank/master template rows generically (see
-        // template-matcher.js#isRealCertificate) - those are placeholder
-        // forms, not real issued certificates, and would otherwise dilute
-        // or mislead the pattern the AI is meant to learn from real ones.
-        sourceCerts = findRecentRealCertificates(allCertificates, category, 3);
-        if (sourceCerts.length > 0) referenceSource = { via: 'category' };
+      // Path 2: same-category real certificates, up to 3. Always computed
+      // (not only when there's no engagement match) - a matched engagement
+      // can easily turn out to have no certificate at all in the category
+      // actually being drafted right now (or one with no extractable
+      // document), and without at least one same-category example the AI
+      // has no way to learn that category's own Annexure/structure pattern,
+      // which is the whole point of this reference-certificate mechanism.
+      // Excludes the 4 blank/master template rows generically (see
+      // template-matcher.js#isRealCertificate) - those are placeholder
+      // forms, not real issued certificates, and would otherwise dilute or
+      // mislead the pattern the AI is meant to learn from real ones.
+      const categorySourceCerts = category ? findRecentRealCertificates(allCertificates, category, 3) : [];
+
+      // Merge, de-duplicated by id, engagement-matched certs first (they
+      // carry the richer same-tender context) followed by any same-category
+      // certs the engagement match didn't already include.
+      const seenIds = new Set();
+      const sourceCerts = [];
+      for (const c of [...engagementSourceCerts, ...categorySourceCerts]) {
+        if (seenIds.has(c.id)) continue;
+        seenIds.add(c.id);
+        sourceCerts.push(c);
+      }
+
+      if (engagementMatch && engagementSourceCerts.length > 0) {
+        referenceSource = { via: 'engagement', tenderNo: engagementMatch.tenderNo, reasoning: engagementMatch.reasoning };
+      } else if (sourceCerts.length > 0) {
+        referenceSource = { via: 'category' };
       }
 
       const sourceCertSkipped = [];
