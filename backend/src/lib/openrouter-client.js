@@ -155,6 +155,33 @@ const DISCLAIMER = [
  * catch and fall back to the manual review queue). Mirrors
  * gemini-client.js#draftFromTemplate exactly.
  */
+// A reference certificate's text is capped per-document in the prompt below
+// (REFERENCE_TEXT_PROMPT_CHARS) so a handful of real certificates never
+// balloon the prompt - but a flat "first N characters" slice can silently
+// cut out the exact thing this whole reference-certificate mechanism exists
+// to show the model: the Annexure computation table. Found 2026-09-06 via
+// debug_info on a real reference certificate (past cert #163) whose OCR'd
+// text is a perfectly normal 6835 characters, but whose "Annexure" heading
+// happens to start at character 4039 - just past the old flat 4000-char
+// cutoff, so the model saw the certificate's letterhead and opening
+// paragraphs but never its Annexure structure at all.
+// When the Annexure falls within the head window, nothing changes - a
+// plain head slice already covers it. When it falls beyond that window,
+// keep a head portion (addressee, opening paragraphs) and splice in the
+// Annexure section itself, rather than the arbitrary bytes that would
+// otherwise occupy the tail of a flat slice.
+const REFERENCE_TEXT_PROMPT_CHARS = 4000;
+function referenceTextForPrompt(text, maxLen = REFERENCE_TEXT_PROMPT_CHARS) {
+  if (!text || text.length <= maxLen) return text;
+  const annexureIdx = text.indexOf('Annexure');
+  if (annexureIdx === -1 || annexureIdx < maxLen) {
+    return text.slice(0, maxLen);
+  }
+  const headLen = Math.floor(maxLen * 0.6);
+  const tailBudget = maxLen - headLen;
+  return `${text.slice(0, headLen)}\n...[reference certificate truncated - jumping ahead to its Annexure section]...\n${text.slice(annexureIdx, annexureIdx + tailBudget)}`;
+}
+
 async function draftFromTemplate({ category, requestType, referenceTemplates, nitText, notes, certMeta, signingPartner, certificateLocation }) {
   // Resolved from a dropdown value in the request form (added 2026-09-05) -
   // see lib/signing-partners.js. Never trusts free text for the partner's
@@ -173,7 +200,7 @@ async function draftFromTemplate({ category, requestType, referenceTemplates, ni
     ? [
         `Reference certificates (${referenceTemplates.length} real, past certificate(s) Singhi & Co. has issued - some may be for a different certificate category than the one you are drafting now, when they come from the same or a similar past tender engagement as this one; study them together to identify the pattern each category actually follows before drafting, and rely only on the one(s) whose category matches "${category}" for that category's own subject matter and Annexure format):`,
         ...referenceTemplates.map(
-          (t, i) => `--- Reference certificate ${i + 1} of ${referenceTemplates.length} (past certificate #${t.id}, category: ${t.category || category}, FY ${t.fy || 'n/a'}) ---\n${t.text.slice(0, 4000)}`
+          (t, i) => `--- Reference certificate ${i + 1} of ${referenceTemplates.length} (past certificate #${t.id}, category: ${t.category || category}, FY ${t.fy || 'n/a'}) ---\n${referenceTextForPrompt(t.text)}`
         ),
       ].join('\n\n')
     : null;
