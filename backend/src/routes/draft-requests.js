@@ -343,7 +343,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
       for (const cert of sourceCerts) {
         const doc = db
           .prepare(
-            `SELECT cd.*, fl.storage_key, fl.mime_type, fl.original_name
+            `SELECT cd.*, cd.file_id AS file_id, fl.storage_key, fl.mime_type, fl.original_name, fl.extracted_text
              FROM certificate_documents cd JOIN file_library fl ON fl.id = cd.file_id
              WHERE cd.certificate_id = ?
              ORDER BY (cd.doc_type = 'certificate') DESC, cd.id ASC
@@ -354,14 +354,44 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
           sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'no certificate_documents row' });
           continue;
         }
+        // Cache hit: a prior attempt (this request or any earlier one) already
+        // paid the OCR cost for this exact document and persisted the result -
+        // reuse it instantly, no re-extraction, no timeout risk.
+        if (doc.extracted_text) {
+          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text: doc.extracted_text, fromCache: true });
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
         const buf = await storage.getObject(doc.storage_key);
+        const extractPromise = extractText(buf, doc.mime_type, doc.original_name);
+        // Persist the result to the cache whenever it actually finishes,
+        // independent of whether this request's own timeout below gives up
+        // on it first. A genuinely scanned document can take minutes of OCR
+        // (see ocr-worker.js) - far longer than any one request should
+        // block on - but that cost only ever needs to be paid once per
+        // document; this is what makes every future reference to the same
+        // certificate a fast cache hit regardless of how this attempt goes.
+        extractPromise
+          .then((text) => {
+            if (text) {
+              db.prepare("UPDATE file_library SET extracted_text = ?, extracted_text_at = datetime('now') WHERE id = ?").run(
+                text,
+                doc.file_id
+              );
+            }
+          })
+          .catch(() => {});
         // eslint-disable-next-line no-await-in-loop
-        const extracted = await withTimeout(extractText(buf, doc.mime_type, doc.original_name), REFERENCE_EXTRACT_TIMEOUT_MS);
+        const extracted = await withTimeout(extractPromise, REFERENCE_EXTRACT_TIMEOUT_MS);
         if (extracted && extracted.__timedOut) {
-          sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'extraction timed out (likely a slow OCR pass on a scanned document)' });
+          sourceCertSkipped.push({
+            id: cert.id,
+            category: cert.category,
+            reason:
+              'extraction timed out for this request (likely a slow OCR pass on a scanned document) - it keeps running in the background and will be cached for future requests once it finishes',
+          });
         } else if (extracted) {
-          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text: extracted });
+          referenceTemplates.push({ id: cert.id, fy: cert.fy, category: cert.category, text: extracted, fromCache: false });
         } else {
           sourceCertSkipped.push({ id: cert.id, category: cert.category, reason: 'no extractable text', mimeType: doc.mime_type });
         }
@@ -376,6 +406,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
         const annexureIdx = t.text.indexOf('Annexure');
         return {
           id: t.id,
+          fromCache: !!t.fromCache,
           textLen: t.text.length,
           head300: t.text.slice(0, 300),
           around4000: t.text.slice(3800, 4400),
@@ -390,7 +421,7 @@ async function attemptAutoDraft({ requestId, requestType, category, notes, nitBu
       debugInfo = {
         nitTextLen: nitText ? nitText.length : 0,
         referenceSource,
-        referenceTemplates: referenceTemplates.map((t) => ({ id: t.id, category: t.category, fy: t.fy, textLen: t.text.length })),
+        referenceTemplates: referenceTemplates.map((t) => ({ id: t.id, category: t.category, fy: t.fy, textLen: t.text.length, fromCache: !!t.fromCache })),
         sourceCertSkipped,
         referenceDocDebug,
       };
